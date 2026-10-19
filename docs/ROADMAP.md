@@ -166,7 +166,7 @@ Heatmap performance plan:
 | **P3c UI: heatmap** ✅ | R9 criteria: corridor raster, 60 fps slider, play, departure/arrival markers | 2.0 h | Day 3 |
 | **P3d UX polish** ✅ | Go through §2.2–2.3 item by item: every state, keyboard, responsive, contrast, shareable URL, small transitions | **1.5 h** | Day 3 |
 | **P4 Ship** ✅ | Dockerfile, deploy, production settings, measure §2.4 targets and fix whatever misses | 1.5 h | Day 3 |
-| **P5 Docs + Loom** | README (setup, our rules for the ambiguities, architecture, measured numbers, trade-offs), 5–10 min Loom | 1.5 h | Day 3–4 |
+| **P5 Docs + Loom** ✅ (Loom: to record) | README (setup, our rules for the ambiguities, architecture, measured numbers, trade-offs), 5–10 min Loom | 1.5 h | Day 3–4 |
 | Buffer | | 0.5 h | Day 4 |
 | **Total** | | **16 h** | |
 
@@ -227,6 +227,7 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
   - **Browser run on the hosted app:** 60 fps playback, no console errors.
   - **Transfer size:** main JS is 153 KB with brotli (578 KB raw).
   - **Railway:** project ready but not deployed, because GCP had no blockers.
+- **2026-10-19**: `find_hazards` hit Open-Meteo's **600 locations/minute** limit when it planned several long trips at 10 mi spacing. A 429 is now its own error (`weather_rate_limited`, "try again in a minute"), and the hazard finder uses 25 mi spacing. Live finding: Richmond → Boston (Tue 10:00 UTC) recommends the slower Route C because it has fewer Moderate miles.
 
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)
