@@ -95,7 +95,7 @@ These go in the README as well, so reviewers see the choices were deliberate.
 | A7 | No Travel isn't in the ranking list | Any route with **No Travel** miles ranks below every route without them. If all routes have some, we still rank them but show a "no safe route at this departure" banner. |
 | A8 | "Balancing" vs the numbered list | A **strict lexicographic** order, exactly as numbered. The UI explains which criterion decided the winner. |
 | A9 | Forecast time at a checkpoint | Departure time + the routing API's cumulative travel time to that point, rounded to the **nearest forecast hour**. |
-| A10 | Rain/snow per hour | Open-Meteo's hourly `rain` and `snowfall` values (each is the total for the preceding hour), requested in inches. Check the snowfall unit in Phase 1. |
+| A10 | Rain/snow per hour | Open-Meteo hourly values (each is the total for the preceding hour), requested in inches (verified: `snowfall` comes back in inches too). **Rain rate = `rain` + `showers`.** Open-Meteo reports convective showers separately, and leaving them out would miss thunderstorm downpours. |
 | A11 | Heatmap slider "0–48 h" | Hours **from now** (the forecast's own clock). Markers on the slider show the trip's departure and arrival. The heatmap colours each cell by its overall risk level (A4). |
 | A12 | Departure in the far future | Departure must be between now and now + 48 h, so every ETA falls inside a reliable forecast. |
 | A13 | API returns fewer than 3 routes | Ask TomTom for 2 alternatives. If it returns fewer, show what came back with a notice. Stretch: generate more by forcing the route through an offset waypoint. |
