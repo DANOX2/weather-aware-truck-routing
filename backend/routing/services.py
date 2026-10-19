@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from django.conf import settings
 
 from .geometry import METERS_PER_MILE, LatLon, simplify
-from .providers import open_meteo, tomtom
+from .providers import open_meteo, tomtom, valhalla
 from .recommend import CRITERIA, rank_routes, route_stats
 from .risk import RiskLevel, assess
 from .sampling import sample_checkpoints
@@ -28,7 +28,18 @@ def plan_trip(
 ) -> dict:
     # "now" (within a minute) lets TomTom use live traffic instead of a historic profile.
     is_now = depart_at - datetime.now(UTC) <= timedelta(minutes=1)
-    routes = tomtom.get_routes(origin, destination, None if is_now else depart_at, weight_lb)
+    provider = "tomtom"
+    try:
+        routes = tomtom.get_routes(origin, destination, None if is_now else depart_at, weight_lb)
+    except tomtom.RoutingProviderError as exc:
+        if exc.code == "no_route":
+            raise
+        # TomTom down, rate limited or unconfigured: fall back to Valhalla (no live traffic).
+        try:
+            routes = valhalla.get_routes(origin, destination, weight_lb)
+        except tomtom.RoutingProviderError:
+            raise exc from None
+        provider = "valhalla"
     depart_ts = depart_at.timestamp()
 
     sampled = [sample_checkpoints(r.geometry, interval_mi) for r in routes]
@@ -123,4 +134,5 @@ def plan_trip(
         "interval_mi": interval_mi,
         "weight_lb": weight_lb,
         "wind_metric": settings.WIND_METRIC,
+        "routing_provider": provider,  # "valhalla" = backup routing without live traffic
     }

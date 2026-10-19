@@ -106,6 +106,12 @@ export function Results({ trip, loading, error, onRetry, selectedId, onSelect, o
             ))}
           </Box>
         )}
+        {trip.routing_provider === 'valhalla' && (
+          <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+            Our main routing service is unavailable, so these routes come from the OpenStreetMap
+            backup. Drive times don't include live traffic.
+          </Typography>
+        )}
         {trip.routes.length < 3 && (
           <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
             Only {trip.routes.length} distinct truck route{trip.routes.length > 1 ? 's' : ''}{' '}

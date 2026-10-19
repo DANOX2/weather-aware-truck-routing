@@ -60,6 +60,7 @@ export interface Trip {
   interval_mi: number
   weight_lb: number
   wind_metric: 'gust' | 'sustained'
+  routing_provider?: 'tomtom' | 'valhalla'
   demo?: boolean
 }
 

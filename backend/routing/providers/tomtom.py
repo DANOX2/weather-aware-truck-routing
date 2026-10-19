@@ -132,7 +132,7 @@ def _parse_route(raw: dict, via_detour: bool = False) -> Route:
     scale = length_m / dists[-1] if dists[-1] else 1.0
     dists = [d * scale for d in dists]
 
-    times = _interpolate_times(dists, raw.get("progress") or [], duration_s)
+    times = interpolate_times(dists, raw.get("progress") or [], duration_s)
     return Route(
         geometry=RouteGeometry(tuple(coords), tuple(dists), tuple(times)),
         distance_m=length_m,
@@ -142,7 +142,7 @@ def _parse_route(raw: dict, via_detour: bool = False) -> Route:
     )
 
 
-def _interpolate_times(dists: list[float], progress: list[dict], duration_s: float) -> list[float]:
+def interpolate_times(dists: list[float], progress: list[dict], duration_s: float) -> list[float]:
     """Travel time at every vertex. TomTom's `progress` is sparse (≈1 entry per 100 points);
     between entries we assume constant speed. Without it, constant speed end to end."""
     anchors = sorted(

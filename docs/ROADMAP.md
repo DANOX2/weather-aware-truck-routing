@@ -118,6 +118,7 @@ These go in the README as well, so reviewers see the choices were deliberate.
 | T9 | **Spotter's visual language** (navy `#061830`, turquoise `#40E0D0`, coral `#F84960`, DM Sans, Lens-style cold→hot heat scale). See `docs/brand.md` | The app should look like it already belongs in their product suite. |
 | T10 | **ruff + pytest** (backend), **oxlint + tsc** (frontend), GitHub Actions CI | Covers the 15% code-quality grade at almost no cost. |
 | T11 | **Hosting: GCP Cloud Run (primary) + Railway (backup)**, both running the same Docker image (port from `$PORT`, Redis optional) | Cloud Run matches Spotter's GCP. Railway is the quickest fallback if GCP setup blocks us. On Cloud Run we skip Redis (managed Redis starts around $35/mo), so each instance keeps its own in-memory cache. |
+| T12 | **Valhalla fallback** (public FOSSGIS server, OpenStreetMap data): used automatically when TomTom fails, is rate limited or isn't configured, but not when TomTom says there's no route. Demo mode is the last resort. | Measured 1.3–1.9 s with 3 real truck alternatives, no key. It has no live traffic and the server is fair-use only, so it's a backup rather than the main provider. Extra TomTom requests would cost about $0.75 per 1,000 if ever needed. |
 
 ### Waiting on you
 | ID | Decision | Recommendation | Blocks |

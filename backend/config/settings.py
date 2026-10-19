@@ -97,6 +97,8 @@ REST_FRAMEWORK = {
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
 OPEN_METEO_URL = os.getenv("OPEN_METEO_URL", "https://api.open-meteo.com/v1/forecast")
 PROVIDER_TIMEOUT_S = float(os.getenv("PROVIDER_TIMEOUT_S", "15"))
+# Fallback router when TomTom fails or is rate limited (fair-use public server)
+VALHALLA_URL = os.getenv("VALHALLA_URL", "https://valhalla1.openstreetmap.de/route")
 
 # Wind value checked against the brief's thresholds: "gust" (default, conservative) or "sustained"
 WIND_METRIC = os.getenv("WIND_METRIC", "gust")

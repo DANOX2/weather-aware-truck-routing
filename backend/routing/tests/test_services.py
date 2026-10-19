@@ -69,3 +69,39 @@ def test_route_payload_is_map_ready(providers, depart):
         route["distance_mi"], abs=0.5
     )
     assert {r["rank"] for r in trip["routes"]} == {1, 2, 3}
+
+
+def test_falls_back_to_valhalla_when_tomtom_is_rate_limited(providers, monkeypatch, depart):
+    def limited(*args, **kwargs):
+        raise services.tomtom.RoutingProviderError("x", code="rate_limited")
+
+    monkeypatch.setattr(services.tomtom, "get_routes", limited)
+    monkeypatch.setattr(
+        services.valhalla, "get_routes", lambda *a: [fake_route(-1.0), fake_route(-2.0, 12)]
+    )
+    trip = services.plan_trip((32.8, -96.8), (39.7, -105.0), depart, 30_000, interval_mi=50)
+    assert trip["routing_provider"] == "valhalla"
+    assert len(trip["routes"]) == 2
+
+
+def test_no_route_does_not_fall_back(monkeypatch, depart):
+    def no_route(*args, **kwargs):
+        raise services.tomtom.RoutingProviderError("x", code="no_route")
+
+    monkeypatch.setattr(services.tomtom, "get_routes", no_route)
+    monkeypatch.setattr(services.valhalla, "get_routes", lambda *a: pytest.fail("no fallback"))
+    with pytest.raises(services.tomtom.RoutingProviderError):
+        services.plan_trip((32.8, -96.8), (39.7, -105.0), depart, 30_000, interval_mi=50)
+
+
+def test_both_providers_down_reports_the_primary_error(monkeypatch, depart):
+    def down(*args, **kwargs):
+        raise services.tomtom.RoutingProviderError("tomtom down")
+
+    def also_down(*args, **kwargs):
+        raise services.tomtom.RoutingProviderError("valhalla down")
+
+    monkeypatch.setattr(services.tomtom, "get_routes", down)
+    monkeypatch.setattr(services.valhalla, "get_routes", also_down)
+    with pytest.raises(services.tomtom.RoutingProviderError, match="tomtom down"):
+        services.plan_trip((32.8, -96.8), (39.7, -105.0), depart, 30_000, interval_mi=50)
