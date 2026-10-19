@@ -129,3 +129,12 @@ def test_demo_mode_replays_recorded_trip_without_providers(client, settings, mon
     assert len(trip["routes"]) == 3
     heat = post(client, "/api/heatmap/", {"paths": [[[0, 0], [1, 1]]], "weight_lb": 30_000}).json()
     assert heat["demo"] is True
+
+
+def test_spa_index_is_served_without_caching(client, settings, tmp_path):
+    (tmp_path / "index.html").write_text("<!doctype html><title>app</title>")
+    settings.FRONTEND_DIST = tmp_path
+    response = client.get("/")
+    assert response.status_code == 200
+    assert b"<title>app</title>" in b"".join(response.streaming_content)
+    assert "no-cache" in response["Cache-Control"]

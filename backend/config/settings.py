@@ -81,6 +81,20 @@ STORAGES = {
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
+# Production serves the built React app from the same origin (no CORS, one deploy).
+# WhiteNoise serves its files at the site root; index.html comes from config.urls.
+FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST", BASE_DIR.parent / "frontend" / "dist"))
+WHITENOISE_ROOT = FRONTEND_DIST if FRONTEND_DIST.is_dir() else None
+# Vite fingerprints assets (name-HASH.ext), so they can be cached forever.
+WHITENOISE_IMMUTABLE_FILE_TEST = r"^.+[.-][0-9a-zA-Z_-]{8,12}\..+$"
+
+if not DEBUG:
+    # Cloud Run and Railway terminate TLS at their proxy.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = os.getenv("DJANGO_SSL_REDIRECT", "1") == "1"
+    SECURE_HSTS_SECONDS = 3600
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
 
 REST_FRAMEWORK = {
