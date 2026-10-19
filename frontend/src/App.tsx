@@ -1,6 +1,6 @@
 import { Box, Stack, Typography } from '@mui/material'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 
 import { type ApiError, planTrip } from './api/client.ts'
 import type { TripRequest } from './api/types.ts'
@@ -8,11 +8,14 @@ import { Results } from './components/Results.tsx'
 import { TripForm } from './components/TripForm.tsx'
 import { tokens } from './theme.ts'
 
+// MapLibre + deck.gl are the heaviest code; load them after the form is interactive.
+const TripMap = lazy(() => import('./components/TripMap.tsx'))
+
 export default function App() {
   const [request, setRequest] = useState<TripRequest | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [editing, setEditing] = useState(true)
-  const [, setHoveredId] = useState<number | null>(null)
+  const [hoveredId, setHoveredId] = useState<number | null>(null)
 
   const trip = useQuery({
     queryKey: ['trip', request],
@@ -81,9 +84,24 @@ export default function App() {
 
       <Box
         component="main"
-        aria-label="Map"
-        sx={{ order: { xs: 1, md: 2 }, bgcolor: tokens.navyDeep, minHeight: { xs: '45vh' } }}
-      />
+        aria-label="Map of route options"
+        sx={{
+          order: { xs: 1, md: 2 },
+          position: 'relative',
+          bgcolor: tokens.navyDeep,
+          minHeight: { xs: '45vh' },
+        }}
+      >
+        <Suspense fallback={null}>
+          <TripMap
+            trip={trip.data}
+            selectedId={selectedId}
+            hoveredId={hoveredId}
+            onSelect={setSelectedId}
+            onHover={setHoveredId}
+          />
+        </Suspense>
+      </Box>
     </Box>
   )
 }

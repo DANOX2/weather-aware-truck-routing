@@ -14,7 +14,6 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TRIP_TIME_FIELDS = ("departure", "arrival")
-CHECKPOINT_TIME_FIELDS = ("eta", "forecast_time")
 
 
 @cache
@@ -31,12 +30,14 @@ def _shift(value: str | None, delta: timedelta) -> str | None:
 def trip(depart_at: datetime) -> dict:
     data = json.loads(json.dumps(_load("dallas-denver.trip.json")))  # deep copy
     delta = depart_at - datetime.fromisoformat(data["routes"][0]["departure"])
+    hourly_delta = timedelta(hours=round(delta.total_seconds() / 3600))
     for route in data["routes"]:
         for field in TRIP_TIME_FIELDS:
             route[field] = _shift(route[field], delta)
         for cp in route["checkpoints"]:
-            for field in CHECKPOINT_TIME_FIELDS:
-                cp[field] = _shift(cp.get(field), delta)
+            cp["eta"] = _shift(cp["eta"], delta)
+            # Forecasts are hourly: move the forecast hour by whole hours only.
+            cp["forecast_time"] = _shift(cp.get("forecast_time"), hourly_delta)
     data["demo"] = True
     return data
 

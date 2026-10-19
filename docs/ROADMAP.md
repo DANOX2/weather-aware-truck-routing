@@ -161,7 +161,7 @@ Heatmap performance plan:
 | **P1 Domain core** ✅ | `risk.py` + boundary-table tests · TomTom + Open-Meteo clients with caching · checkpoint sampling, ETAs and ranking ("why" data included) with tests | 3.0 h | Day 1 |
 | **P2 API** ✅ | `/trips`, `/geocode`, `/heatmap`; request checks; clear error codes the UI can turn into messages | 1.0 h | Day 2 |
 | **P3a UI: plan** ✅ | Trip form meeting R1–R3 criteria · route cards with "why it won" and risk strip | 2.0 h | Day 2 |
-| **P3b UI: map** | R8 criteria: route ↔ card highlighting, checkpoint tooltips explaining the cause, legend, camera | 2.0 h | Day 2–3 |
+| **P3b UI: map** ✅ | R8 criteria: route ↔ card highlighting, checkpoint tooltips explaining the cause, legend, camera | 2.0 h | Day 2–3 |
 | **P3c UI: heatmap** | R9 criteria: corridor raster, 60 fps slider, play, departure/arrival markers | 2.0 h | Day 3 |
 | **P3d UX polish** | Go through §2.2–2.3 item by item: every state, keyboard, responsive, contrast, shareable URL, small transitions | **1.5 h** | Day 3 |
 | **P4 Ship** | Dockerfile, deploy, production settings, measure §2.4 targets and fix whatever misses | 1.5 h | Day 3 |
@@ -213,6 +213,7 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
 - **2026-10-19**: Live API on Dallas → Denver: `/trips` **3.6 s** cold, 52 KB (9.6 KB gzipped) · `/heatmap` **0.8 s** cold / 69 ms cached, 14 KB for all 49 hours.
 - **2026-10-19**: Shorter trips can have fewer than 3 truck routes (Houston → New Orleans: 1; Albuquerque → Denver: 2) because the detours fail the time or overlap filters. The UI says so plainly. Possible tuning: adapt the detour offset to trip length.
 - **2026-10-19**: For the Loom, scan the live US forecast on recording day (coarse grid, ~230 Open-Meteo calls) and pick a trip that crosses real hazardous weather. Hazards are local, so check the trip with the real checkpoints before recording.
+- **2026-10-19**: MapLibre 6 + Vite: the worker has to be loaded as an asset (`setWorkerUrl`). deck.gl 9.4's interleaved mode draws nothing on MapLibre 6, so we use the overlaid mode. MapLibre's CSS sets `position: relative` on its container, so the container is sized explicitly. Initial JS is 183 KB gzipped; the map chunk is lazy-loaded.
 
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)
