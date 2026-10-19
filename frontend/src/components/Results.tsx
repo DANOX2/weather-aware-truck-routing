@@ -114,8 +114,9 @@ export function Results({ trip, loading, error, onRetry, selectedId, onSelect, o
         )}
         {trip.routes.length < 3 && (
           <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
-            Only {trip.routes.length} distinct truck route{trip.routes.length > 1 ? 's' : ''}{' '}
-            exist{trip.routes.length > 1 ? '' : 's'} for this trip.
+            Only {trip.routes.length} truck route{trip.routes.length > 1 ? 's' : ''} for this
+            trip {trip.routes.length > 1 ? 'are' : 'is'} within twice the fastest time without
+            repeating another.
           </Typography>
         )}
       </Box>

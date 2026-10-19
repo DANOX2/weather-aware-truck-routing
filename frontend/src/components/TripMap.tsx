@@ -1,12 +1,15 @@
 import type { PickingInfo } from '@deck.gl/core'
-import { BitmapLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers'
+import { CollisionFilterExtension, type CollisionFilterExtensionProps } from '@deck.gl/extensions'
+import { BitmapLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import { MapboxOverlay } from '@deck.gl/mapbox'
-import { Box, Paper, Stack, Typography } from '@mui/material'
+import { Box, Paper, Stack, Typography, useMediaQuery } from '@mui/material'
+import { useQuery } from '@tanstack/react-query'
 import {
   AttributionControl,
   LngLatBounds,
   Map as MapLibre,
   NavigationControl,
+  type RasterTileSource,
   setWorkerUrl,
 } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -17,14 +20,27 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Checkpoint, Heatmap, Route, Trip } from '../api/types.ts'
 import { describeCause } from '../lib/explain.ts'
 import { buildFrames, truckStatus } from '../lib/heatmap.ts'
-import { RISK_LABEL, ROUTE_NAMES, formatTime } from '../lib/format.ts'
+import { RISK_LABEL, ROUTE_NAMES, formatDuration, formatMiles, formatTime } from '../lib/format.ts'
+import {
+  RADAR_ATTRIBUTION,
+  RADAR_REFRESH_MS,
+  latestRadarTime,
+  radarTileUrl,
+} from '../lib/radar.ts'
 import { riskColors, routeColors, tokens } from '../theme.ts'
-import { HeatmapControls, type TruckStatusLine } from './HeatmapControls.tsx'
+import { HeatmapControls, type MapLayer, type TruckStatusLine } from './HeatmapControls.tsx'
 
 setWorkerUrl(workerUrl)
 
 const BASEMAP = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 const US_CENTER: [number, number] = [-98.5, 39.5]
+const DATA_CREDITS = [
+  'Routing © <a href="https://www.tomtom.com/" target="_blank">TomTom</a>',
+  'Weather data by <a href="https://open-meteo.com/" target="_blank">Open-Meteo.com</a>',
+]
+const labelCollision = new CollisionFilterExtension() // hides a label that would overlap another
+// Checkpoints the truck passes this close to the slider's time get a ring.
+const NOW_WINDOW_S = 45 * 60
 
 type RGBA = [number, number, number, number]
 const rgba = (hex: string, alpha = 255): RGBA => [
@@ -66,6 +82,9 @@ export default function TripMap({
   const map = useRef<MapLibre | null>(null)
   const overlay = useRef<MapboxOverlay | null>(null)
   const [tooltip, setTooltip] = useState<Omit<TooltipProps, 'trip'> | null>(null)
+  const [styleReady, setStyleReady] = useState(false)
+  // Small screens get name-only labels; the route cards sit right below the map there.
+  const compactLabels = useMediaQuery((theme) => theme.breakpoints.down('md'))
 
   // Create the map once.
   useEffect(() => {
@@ -80,7 +99,11 @@ export default function TripMap({
     })
     instance.addControl(new NavigationControl({ showCompass: false }), 'top-right')
     // Top-left keeps the credit clear of the heatmap panel on every screen size.
-    instance.addControl(new AttributionControl({ compact: true }), 'top-left')
+    instance.addControl(
+      new AttributionControl({ compact: true, customAttribution: DATA_CREDITS }),
+      'top-left',
+    )
+    instance.once('load', () => setStyleReady(true))
     // Overlaid (own canvas): deck.gl 9.4's interleaved mode does not render with MapLibre 6.
     const deck = new MapboxOverlay({ interleaved: false, layers: [] })
     instance.addControl(deck)
@@ -118,7 +141,8 @@ export default function TripMap({
   const frames = useMemo(() => (heatmap ? buildFrames(heatmap) : null), [heatmap])
   const [hour, setHour] = useState(0)
   const [playing, setPlaying] = useState(false)
-  const [heatVisible, setHeatVisible] = useState(true)
+  const [layer, setLayer] = useState<MapLayer>('forecast')
+  const heatVisible = layer === 'forecast'
   const start = frames?.start ?? null
   const departHour =
     start !== null && focusRoute ? clampHour(hoursBetween(start, focusRoute.departure)) : null
@@ -198,6 +222,41 @@ export default function TripMap({
           ),
         updateTriggers: { getRadius: focusId, getFillColor: focusId, getLineColor: focusId },
       }),
+      new TextLayer<Route, CollisionFilterExtensionProps<Route>>({
+        id: 'route-labels',
+        data: routes,
+        getPosition: labelPosition,
+        getText: (r) =>
+          compactLabels
+            ? `Route ${ROUTE_NAMES[r.id]}`
+            : routeLabel(r, r.id === trip.recommendation.route_id),
+        getSize: 12,
+        lineHeight: 1.35,
+        fontFamily: '"DM Sans", system-ui, sans-serif',
+        fontWeight: 600,
+        characterSet: 'auto',
+        getColor: [255, 255, 255, 255],
+        background: true,
+        getBackgroundColor: (r) => rgba(tokens.navyDeep, isFocus(r) ? 240 : 200),
+        getBorderColor: (r) => rgba(routeColors[r.id % routeColors.length]),
+        getBorderWidth: (r) => (isFocus(r) ? 2 : 1),
+        backgroundPadding: [7, 4],
+        pickable: true,
+        onClick: ({ object }) => object && onSelect(object.id),
+        onHover: ({ object }) => onHover(object?.id ?? null),
+        extensions: [labelCollision],
+        collisionEnabled: true,
+        // The focused route's label wins a collision, then the recommended one.
+        getCollisionPriority: (r) =>
+          isFocus(r) ? 2 : r.id === trip.recommendation.route_id ? 1 : 0,
+        collisionTestProps: { sizeScale: 1.3 },
+        updateTriggers: {
+          getBackgroundColor: focusId,
+          getBorderWidth: focusId,
+          getCollisionPriority: focusId,
+          getText: compactLabels,
+        },
+      }),
       new ScatterplotLayer<{ position: [number, number]; color: RGBA }>({
         id: 'endpoints',
         data: [
@@ -214,11 +273,60 @@ export default function TripMap({
         lineWidthUnits: 'pixels',
       }),
     ]
-  }, [trip, focusId, onSelect, onHover])
+  }, [trip, focusId, onSelect, onHover, compactLabels])
 
   const truck = frames && focusRoute ? truckStatus(focusRoute, frames.start + hour * 3600) : null
   const statusLine = trip && focusRoute && truck ? describeTruck(trip, focusRoute, truck) : null
-  const truckAt = truck?.phase === 'en-route' ? truck.position : null
+  // The truck belongs to the forecast's clock, so the live radar hides it.
+  const truckAt = truck?.phase === 'en-route' && layer !== 'radar' ? truck.position : null
+  // The checkpoints to compare with the shading: the ones the truck passes around this hour.
+  const nowCheckpoints = useMemo(() => {
+    if (!frames || !focusRoute || !heatVisible) return []
+    const at = frames.start + hour * 3600
+    return focusRoute.checkpoints.filter(
+      (cp) => cp.level && Math.abs(Date.parse(cp.eta) / 1000 - at) <= NOW_WINDOW_S,
+    )
+  }, [frames, focusRoute, heatVisible, hour])
+
+  // Live radar: the latest scan time, refreshed every 2 minutes while the radar is on.
+  const radarScan = useQuery({
+    queryKey: ['radar-scan'],
+    queryFn: ({ signal }) => latestRadarTime(signal),
+    enabled: layer === 'radar',
+    refetchInterval: RADAR_REFRESH_MS,
+    staleTime: RADAR_REFRESH_MS / 2,
+  })
+  const scan = layer === 'radar' ? (radarScan.data ?? null) : null
+
+  // A MapLibre raster layer (under the basemap's labels), so tiles stream and cache natively.
+  useEffect(() => {
+    const instance = map.current
+    if (!instance || !styleReady) return
+    const source = instance.getSource<RasterTileSource>('radar')
+    if (!scan) {
+      if (source) {
+        instance.removeLayer('radar')
+        instance.removeSource('radar')
+      }
+      return
+    }
+    if (source) {
+      source.setTiles([radarTileUrl(scan)])
+      return
+    }
+    instance.addSource('radar', {
+      type: 'raster',
+      tiles: [radarTileUrl(scan)],
+      tileSize: 256,
+      maxzoom: 10,
+      attribution: RADAR_ATTRIBUTION,
+    })
+    const firstLabel = instance.getStyle().layers.find((l) => l.type === 'symbol')?.id
+    instance.addLayer(
+      { id: 'radar', type: 'raster', source: 'radar', paint: { 'raster-opacity': 0.8 } },
+      firstLabel,
+    )
+  }, [scan, styleReady])
 
   // Per-frame layers: two forecast hours cross-faded, plus the truck at that moment.
   useEffect(() => {
@@ -240,6 +348,18 @@ export default function TripMap({
       layers: [
         ...frameLayers,
         ...routeLayers,
+        new ScatterplotLayer<Checkpoint>({
+          id: 'checkpoints-now',
+          data: nowCheckpoints,
+          getPosition: (cp) => [cp.lon, cp.lat],
+          getRadius: 10,
+          radiusUnits: 'pixels',
+          filled: false,
+          stroked: true,
+          getLineColor: [255, 255, 255, 220],
+          getLineWidth: 2,
+          lineWidthUnits: 'pixels',
+        }),
         new ScatterplotLayer<[number, number]>({
           id: 'truck',
           data: truckAt ? [truckAt] : [],
@@ -255,7 +375,7 @@ export default function TripMap({
         }),
       ],
     })
-  }, [routeLayers, frames, heatVisible, hour, focusRoute, truckAt])
+  }, [routeLayers, frames, heatVisible, hour, focusRoute, truckAt, nowCheckpoints])
 
   return (
     <Box sx={{ position: 'absolute', inset: 0 }} onMouseLeave={() => setTooltip(null)}>
@@ -271,8 +391,9 @@ export default function TripMap({
           onHour={setHour}
           playing={playing}
           onPlaying={setPlaying}
-          visible={heatVisible}
-          onVisible={setHeatVisible}
+          layer={layer}
+          onLayer={setLayer}
+          radar={{ scan, error: radarScan.isError }}
           departHour={departHour}
           arriveHour={arriveHour}
           loading={heatmapLoading}
@@ -286,6 +407,25 @@ export default function TripMap({
 }
 
 const TOOLTIP_WIDTH = 260
+
+/** Route summary pinned on the map, staggered along each route so labels rarely collide. */
+function routeLabel(route: Route, recommended: boolean): string {
+  const miles = route.miles_by_level
+  const worst = miles.NO_TRAVEL
+    ? `${formatMiles(miles.NO_TRAVEL)} No travel`
+    : miles.SEVERE
+      ? `${formatMiles(miles.SEVERE)} Severe`
+      : miles.HIGH
+        ? `${formatMiles(miles.HIGH)} High`
+        : 'No Severe or High'
+  const name = `Route ${ROUTE_NAMES[route.id]}${recommended ? ' · Recommended' : ''}`
+  return `${name}\n${formatDuration(route.duration_s)} · ${worst}`
+}
+
+function labelPosition(route: Route): [number, number] {
+  const share = [0.5, 0.35, 0.65][route.id % 3]
+  return route.path[Math.round((route.path.length - 1) * share)]
+}
 
 /** The heatmap's status line: where the focused route's truck is at the slider's hour, and why. */
 function describeTruck(

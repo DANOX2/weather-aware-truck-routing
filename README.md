@@ -10,11 +10,12 @@ Picks the safest truck route by checking the forecast **at each checkpoint for t
 ## What it does
 
 1. **Enter a trip:** origin and destination (autocomplete), a departure up to 48 h ahead, and the load weight.
-2. **Get up to 3 truck routes.** Each is sampled every **10, 25 or 50 miles**. Switching the interval re-scores straight away, with no new routing call.
+2. **Get 3 truck routes.** Fewer only when the road network has no other route within twice the fastest time that isn't a near-copy. Each route is sampled every **10, 25 or 50 miles**. Switching the interval re-scores straight away, with no new routing call.
 3. **Each checkpoint is checked against the forecast hour when the truck gets there**, scored with the brief's wind, rain and snow table plus the load rules.
 4. **One route is recommended**, with a plain explanation of how it beat each alternative, e.g. *"vs Route B: fewer Severe miles (0 mi vs 31 mi)"*.
-5. **The map** shows every route, the checkpoints coloured by risk, and tooltips with the cause ("38 mph gusts with a 42,000 lb load"), the ETA and the forecast hour used.
-6. **A 0–48 h heatmap** along the trip corridor has a slider and a play button. Above the slider, a risk-over-time chart shows when bad weather peaks, with the trip window highlighted, so you don't have to scrub to find the storm. A truck marker and a status line follow the selected hour: *"Route A · mile 441 · Moderate: 0.30 in/hr rain"*, then *"arrived … · corridor forecast only"* once the trip is over.
+5. **The map** shows every route with a summary label (time and worst risk), the checkpoints coloured by risk, and tooltips with the cause ("38 mph gusts with a 42,000 lb load"), the ETA and the forecast hour used.
+6. **A 0–48 h heatmap** along the trip corridor has a slider and a play button. Above the slider, a risk-over-time chart shows when bad weather peaks, with the trip window highlighted, so you don't have to scrub to find the storm. A truck marker and a status line follow the selected hour: *"Route A · mile 441 · Moderate: 0.30 in/hr rain"*, then *"arrived … · corridor forecast only"* once the trip is over. The checkpoints the truck passes around the selected hour get a ring, so you know which dots to compare with the shading.
+7. **Live radar** (one switch away from the forecast): NOAA's current US radar, coloured by precipitation **type**: rain, cool rain, snow, storms, hail and tropical rain. It refreshes every 2 minutes. The forecast stays the planning layer; the radar shows what is falling right now.
 
 ## How the recommendation works
 
@@ -46,6 +47,7 @@ Values within a small tolerance count as ties, so rounding noise never decides a
 | What counts as "Severe miles"? | Each checkpoint covers the road **halfway to its neighbours**, so a route's miles always add up to its length. |
 | Rain rate | Open-Meteo `rain` **+ `showers`**. Showers are reported separately, and leaving them out would miss thunderstorm downpours. |
 | Which forecast hour? | Departure + the routing API's travel time to that point, rounded to the **nearest hour**. |
+| Dots and shading disagree? | They answer different questions. A dot is the forecast **when the truck reaches it**; the shading is the whole corridor **at the slider's hour**. Next to the truck marker (the ringed dots) they line up. The shading is also coarser (cells of 0.25–1°, smoothed) to fit 49 hours in one request. |
 | Heatmap "0–48 h" | Hours from **now**, not from departure: it's a forecast for the corridor, and the hours after arrival still show whether leaving later would be safer. The trip window is highlighted and the status line says when the truck hasn't left yet or has already arrived. Low risk is left **unshaded**, so any tint means Moderate or worse. |
 | Departure window | Now to now + 48 h, so every ETA stays inside a reliable forecast. |
 
@@ -79,10 +81,11 @@ Provider failures come back as stable codes (`no_route`, `rate_limited`, `weathe
 | Truck routing | **TomTom** (`travelMode=truck`, `vehicleWeight`, live traffic) | Truck-aware, gives travel time along the route, free tier with no card |
 | Routing fallback | **Valhalla** (OpenStreetMap, public server) | Used automatically if TomTom is down or rate-limited. The UI notes that live traffic isn't included. |
 | Forecast | **Open-Meteo** hourly | No key, many points per request, mph and inches |
+| Live radar | **NOAA MRMS** precipitation type (WMS) | Free, no key, CORS-enabled, a new US scan about every 2 min; loaded straight by the browser as map tiles |
 | Basemap | CARTO Dark Matter | No key; matches the dark UI |
 
 Speed and quota choices:
-- TomTom's own `maxAlternatives` added ~5.5 s on long trips (measured 7.4 s vs 1.8 s). So the main route and two detours through offset waypoints are fetched **in parallel**, filtered for duplicates and for slow outliers.
+- TomTom's own `maxAlternatives` added ~5.5 s on long trips (measured 7.4 s vs 1.8 s). So the main route and two detours through offset waypoints are fetched **in parallel**, filtered for duplicates and for slow outliers. Only trips still short of 3 routes (short trips, where it's cheap) then ask TomTom for its alternatives, with looser limits: up to 2× the fastest and at least 10% different road.
 - Open-Meteo counts every location as a call (10k/day, 600/min). Coordinates are snapped to a 0.1° grid and shared between routes. The heatmap only fetches a **corridor** of at most 300 cells.
 - Everything is cached: routes for 10 min, forecasts for 30 min, searches for 1 day. Redis is used when `REDIS_URL` is set, in-process memory otherwise.
 
@@ -129,7 +132,7 @@ npm run dev
 ## Tests and quality
 
 ```bash
-cd backend  && uv run pytest && uv run ruff check .     # 115 tests, providers mocked
+cd backend  && uv run pytest && uv run ruff check .     # 117 tests, providers mocked
 cd frontend && npm run lint && npm run build             # oxlint + type check
 ```
 
@@ -152,7 +155,8 @@ The same image runs on Railway or anywhere that sets `$PORT`.
 ## Trade-offs and next steps
 
 - **Detour routes:** these sometimes look less natural than a router's own alternatives. They're filtered by overlap and time, and the routing response says which routes are detours.
-- **Shorter trips:** some have only 1–2 truly distinct truck routes. The UI says so rather than inventing a third.
+- **Shorter trips:** a few (e.g. Corpus Christi → Brownsville) have only 2 truck routes within twice the fastest time. The UI says so rather than inventing a third.
+- **Live radar coverage:** the NOAA mosaic covers the contiguous US only, like the rest of the app's routing.
 - **Forecast-hour rounding:** checkpoints use the nearest forecast hour. Interpolating between hours would be a small refinement.
 - **Next steps:**
   - a departure-time advisor ("leave at 14:00 → 0 Severe miles"), re-scoring the cached forecast for later departures;
