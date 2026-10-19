@@ -8,6 +8,7 @@ const MESSAGES: Record<string, string> = {
   rate_limited: 'The routing service is busy right now. Try again in a minute.',
   routing_unavailable: "We couldn't reach the routing service. Try again.",
   weather_unavailable: "We couldn't load the forecast. Try again.",
+  weather_rate_limited: 'The weather service is busy right now. Try again in a minute.',
   not_configured: 'Routing is not configured on this server.',
   network: 'No connection to the server. Check your internet and try again.',
 }

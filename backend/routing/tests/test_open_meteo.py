@@ -76,3 +76,11 @@ def test_index_at_picks_nearest_hour():
     assert forecast.index_at(5400) == 2
     assert forecast.index_at(3 * 3600) is None
     assert forecast.index_at(-3600) is None
+
+
+@respx.mock
+def test_rate_limit_has_its_own_code():
+    respx.get(URL).mock(return_value=httpx.Response(429))
+    with pytest.raises(WeatherProviderError) as exc:
+        get_forecasts([(30.0, -90.0)])
+    assert exc.value.code == "weather_rate_limited"

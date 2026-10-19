@@ -75,6 +75,7 @@ def test_departure_a_few_minutes_ago_counts_as_now(client, plan):
         (RoutingProviderError("x", code="rate_limited"), 503, "rate_limited"),
         (RoutingProviderError("x"), 502, "routing_unavailable"),
         (WeatherProviderError("x"), 502, "weather_unavailable"),
+        (WeatherProviderError("x", code="weather_rate_limited"), 503, "weather_rate_limited"),
     ],
 )
 def test_provider_errors_map_to_stable_codes(client, monkeypatch, error, http, code):

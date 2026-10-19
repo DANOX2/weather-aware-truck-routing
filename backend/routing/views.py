@@ -22,7 +22,12 @@ def _provider_error(exc: Exception) -> Response:
         code = exc.code
         http = ROUTING_STATUS.get(code, status.HTTP_502_BAD_GATEWAY)
     else:
-        code, http = "weather_unavailable", status.HTTP_502_BAD_GATEWAY
+        code = getattr(exc, "code", "weather_unavailable")
+        http = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if code == "weather_rate_limited"
+            else status.HTTP_502_BAD_GATEWAY
+        )
     return Response({"code": code, "detail": str(exc)}, status=http)
 
 

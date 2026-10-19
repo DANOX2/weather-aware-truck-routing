@@ -21,7 +21,11 @@ HOURLY_VARS = "wind_speed_10m,wind_gusts_10m,rain,showers,snowfall"
 
 
 class WeatherProviderError(Exception):
-    pass
+    """Forecast unavailable. `code` is safe to show the UI."""
+
+    def __init__(self, message: str, code: str = "weather_unavailable"):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -85,9 +89,13 @@ def _fetch_batch(client: httpx.Client, points: list[tuple[float, float]]) -> lis
     }
     try:
         response = client.get(settings.OPEN_METEO_URL, params=params)
-        response.raise_for_status()
     except httpx.HTTPError as exc:
-        raise WeatherProviderError(f"Open-Meteo request failed: {exc}") from exc
+        raise WeatherProviderError(f"Open-Meteo request failed: {type(exc).__name__}") from exc
+    if response.status_code == 429:
+        # Free tier: 600 locations/min, 10k/day per IP. Usually clears within a minute.
+        raise WeatherProviderError("Open-Meteo rate limit reached", code="weather_rate_limited")
+    if response.status_code >= 400:
+        raise WeatherProviderError(f"Open-Meteo returned HTTP {response.status_code}")
     data = response.json()
     # A single location comes back as an object, several as a list.
     items = data if isinstance(data, list) else [data]
