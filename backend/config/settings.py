@@ -100,3 +100,6 @@ PROVIDER_TIMEOUT_S = float(os.getenv("PROVIDER_TIMEOUT_S", "15"))
 
 # Wind value checked against the brief's thresholds: "gust" (default, conservative) or "sustained"
 WIND_METRIC = os.getenv("WIND_METRIC", "gust")
+
+# Replay a recorded trip instead of calling providers (UI development, quota exhausted)
+DEMO_FIXTURES = os.getenv("DEMO_FIXTURES", "0") == "1"

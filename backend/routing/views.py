@@ -1,8 +1,9 @@
+from django.conf import settings
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from . import services
+from . import demo, services
 from .heatmap import build_heatmap
 from .providers.open_meteo import WeatherProviderError
 from .providers.tomtom import RoutingProviderError, search_places
@@ -47,6 +48,8 @@ def trips(request):
     serializer = TripRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
+    if settings.DEMO_FIXTURES:
+        return Response(demo.trip(data["depart_at"]))
     try:
         trip = services.plan_trip(
             origin=(data["origin"]["lat"], data["origin"]["lon"]),
@@ -65,6 +68,8 @@ def heatmap(request):
     serializer = HeatmapRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
+    if settings.DEMO_FIXTURES:
+        return Response(demo.heatmap())
     paths = [[(lat, lon) for lon, lat in path] for path in data["paths"]]
     try:
         return Response(build_heatmap(paths, data["weight_lb"]))

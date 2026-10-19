@@ -117,3 +117,15 @@ def test_heatmap_converts_lonlat_paths(client, monkeypatch):
 def test_heatmap_rejects_too_many_paths(client):
     body = {"paths": [[[0, 0], [1, 1]]] * 6, "weight_lb": 30_000}
     assert post(client, "/api/heatmap/", body).status_code == 400
+
+
+def test_demo_mode_replays_recorded_trip_without_providers(client, settings, monkeypatch):
+    settings.DEMO_FIXTURES = True
+    monkeypatch.setattr(views.services, "plan_trip", lambda **k: pytest.fail("no providers"))
+    depart = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(hours=3)
+    trip = post(client, "/api/trips/", trip_body(depart_at=depart.isoformat())).json()
+    assert trip["demo"] is True
+    assert datetime.fromisoformat(trip["routes"][0]["departure"]) == depart
+    assert len(trip["routes"]) == 3
+    heat = post(client, "/api/heatmap/", {"paths": [[[0, 0], [1, 1]]], "weight_lb": 30_000}).json()
+    assert heat["demo"] is True
