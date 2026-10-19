@@ -40,7 +40,7 @@ export default function App() {
       sx={{
         display: 'grid',
         gridTemplateColumns: { xs: '1fr', md: '420px 1fr' },
-        gridTemplateRows: { xs: '45vh auto', md: '100vh' },
+        gridTemplateRows: { xs: '62vh auto', md: '100vh' },
         height: { md: '100vh' },
       }}
     >
@@ -98,7 +98,7 @@ export default function App() {
           order: { xs: 1, md: 2 },
           position: 'relative',
           bgcolor: tokens.navyDeep,
-          minHeight: { xs: '45vh' },
+          minHeight: { xs: '62vh' },
         }}
       >
         <Suspense fallback={null}>

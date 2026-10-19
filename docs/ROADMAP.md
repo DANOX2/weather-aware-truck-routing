@@ -164,7 +164,7 @@ Heatmap performance plan:
 | **P3a UI: plan** ✅ | Trip form meeting R1–R3 criteria · route cards with "why it won" and risk strip | 2.0 h | Day 2 |
 | **P3b UI: map** ✅ | R8 criteria: route ↔ card highlighting, checkpoint tooltips explaining the cause, legend, camera | 2.0 h | Day 2–3 |
 | **P3c UI: heatmap** ✅ | R9 criteria: corridor raster, 60 fps slider, play, departure/arrival markers | 2.0 h | Day 3 |
-| **P3d UX polish** | Go through §2.2–2.3 item by item: every state, keyboard, responsive, contrast, shareable URL, small transitions | **1.5 h** | Day 3 |
+| **P3d UX polish** ✅ | Go through §2.2–2.3 item by item: every state, keyboard, responsive, contrast, shareable URL, small transitions | **1.5 h** | Day 3 |
 | **P4 Ship** | Dockerfile, deploy, production settings, measure §2.4 targets and fix whatever misses | 1.5 h | Day 3 |
 | **P5 Docs + Loom** | README (setup, our rules for the ambiguities, architecture, measured numbers, trade-offs), 5–10 min Loom | 1.5 h | Day 3–4 |
 | Buffer | | 0.5 h | Day 4 |
@@ -217,6 +217,11 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
 - **2026-10-19**: MapLibre 6 + Vite: the worker has to be loaded as an asset (`setWorkerUrl`). deck.gl 9.4's interleaved mode draws nothing on MapLibre 6, so we use the overlaid mode. MapLibre's CSS sets `position: relative` on its container, so the container is sized explicitly. Initial JS is 183 KB gzipped; the map chunk is lazy-loaded.
 - **2026-10-19**: Heatmap playback on an **Intel UHD 620 (production build): 60 fps, p95 16.8 ms, max 16.8 ms** (measured with headless Chrome on Vulkan). The dev build showed p95 33 ms because of React's dev mode, so always measure production. Route layers are memoised separately from the per-frame layers, and there's one cached image per forecast hour.
 - **2026-10-19**: Heatmap colours: Low is left unshaded (shading starts at index 0.8). Shading the Low band in yellow read as Moderate and misled. The legend says "No shading = low risk".
+- **2026-10-19**: UX audit, scripted with Playwright against the production build:
+  - **Keyboard:** Enter submits from any field; the tab order follows the form; the native date-time input needs several Tab presses (browser behaviour).
+  - **Error states:** a provider outage shows a plain message with Retry, which recovers. Server validation messages land on the matching field.
+  - **Phone (390×844):** the map takes 62% of the height and the heatmap panel is compact.
+  - **Cut on purpose:** shareable URL and mobile bottom sheet (see the cut list).
 
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)

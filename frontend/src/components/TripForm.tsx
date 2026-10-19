@@ -82,7 +82,13 @@ export function TripForm({ onSubmit, busy, serverErrors, collapsed, onEdit }: Pr
   const weight = weightText.trim() ? Number(weightText.replace(/[^\d]/g, '')) : null
   const errors = validate(origin, destination, depart, weight)
   const shown: Errors = submitted ? errors : {}
-  const serverDepart = serverErrors?.depart_at?.[0]
+  // Server-side validation backs up the client checks; show each message on its field.
+  const server = {
+    origin: serverErrors?.origin?.[0],
+    destination: serverErrors?.destination?.[0] ?? serverErrors?.non_field_errors?.[0],
+    depart: serverErrors?.depart_at?.[0],
+    weight: serverErrors?.weight_lb?.[0],
+  }
 
   const submit = (trip: Partial<{ interval: (typeof INTERVALS)[number] }> = {}) => {
     setSubmitted(true)
@@ -170,13 +176,13 @@ export function TripForm({ onSubmit, busy, serverErrors, collapsed, onEdit }: Pr
               label="From"
               value={origin}
               onChange={setOrigin}
-              error={shown.origin}
+              error={shown.origin ?? server.origin}
             />
             <PlaceAutocomplete
               label="To"
               value={destination}
               onChange={setDestination}
-              error={shown.destination}
+              error={shown.destination ?? server.destination}
             />
           </Stack>
           <Tooltip title="Swap origin and destination">
@@ -198,9 +204,11 @@ export function TripForm({ onSubmit, busy, serverErrors, collapsed, onEdit }: Pr
           type="datetime-local"
           value={depart}
           onChange={(e) => setDepart(e.target.value)}
-          error={Boolean(shown.depart || serverDepart)}
+          error={Boolean(shown.depart ?? server.depart)}
           helperText={
-            shown.depart ?? serverDepart ?? `Your local time (${utcOffsetLabel()}), up to 48 h ahead`
+            shown.depart ??
+            server.depart ??
+            `Your local time (${utcOffsetLabel()}), up to 48 h ahead`
           }
           sx={{ '& input': { colorScheme: 'dark' } }}
           slotProps={{ inputLabel: { shrink: true }, htmlInput: bounds }}
@@ -213,9 +221,10 @@ export function TripForm({ onSubmit, busy, serverErrors, collapsed, onEdit }: Pr
             const digits = e.target.value.replace(/[^\d]/g, '').slice(0, 6)
             setWeightText(digits ? Number(digits).toLocaleString() : '')
           }}
-          error={Boolean(shown.weight)}
+          error={Boolean(shown.weight ?? server.weight)}
           helperText={
-            shown.weight ?? (
+            shown.weight ??
+            server.weight ?? (
               <>
                 Over 30,000 lb, 45–54 mph winds become <b>No travel</b>. Over 40,000 lb, 35–44
                 mph winds become <b>Severe</b>.

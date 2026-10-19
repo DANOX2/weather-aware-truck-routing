@@ -79,7 +79,8 @@ export default function TripMap({
       pitchWithRotate: false,
     })
     instance.addControl(new NavigationControl({ showCompass: false }), 'top-right')
-    instance.addControl(new AttributionControl({ compact: true }), 'bottom-right')
+    // Top-left keeps the credit clear of the heatmap panel on every screen size.
+    instance.addControl(new AttributionControl({ compact: true }), 'top-left')
     // Overlaid (own canvas): deck.gl 9.4's interleaved mode does not render with MapLibre 6.
     const deck = new MapboxOverlay({ interleaved: false, layers: [] })
     instance.addControl(deck)
@@ -101,7 +102,13 @@ export default function TripMap({
     if (!trip || !map.current) return
     const bounds = new LngLatBounds()
     trip.routes.forEach((r) => r.path.forEach((p) => bounds.extend(p)))
-    map.current.fitBounds(bounds, { padding: 64, duration: 900, maxZoom: 9 })
+    // Leave room for the heatmap panel along the bottom edge.
+    const compact = map.current.getContainer().clientWidth < 600
+    map.current.fitBounds(bounds, {
+      padding: { top: 48, left: 48, right: 64, bottom: compact ? 130 : 190 },
+      duration: 900,
+      maxZoom: 9,
+    })
   }, [trip])
 
   const focusId = hoveredId ?? selectedId ?? trip?.recommendation.route_id ?? null

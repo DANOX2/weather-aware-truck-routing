@@ -86,9 +86,9 @@ export function HeatmapControls({
         right: { xs: 16, md: 'auto' },
         bottom: 16,
         width: { md: 560 },
-        px: 2,
-        pt: 1,
-        pb: 1.5,
+        px: { xs: 1.5, md: 2 },
+        pt: { xs: 0.5, md: 1 },
+        pb: { xs: 0.5, md: 1.5 },
         bgcolor: 'rgba(13, 30, 45, 0.9)',
         backdropFilter: 'blur(6px)',
       }}
@@ -150,7 +150,12 @@ export function HeatmapControls({
           }}
         />
       </Box>
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* The legend also sits under the route list, so phones skip it here to keep the map visible. */}
+      <Stack
+        direction="row"
+        spacing={1.5}
+        sx={{ alignItems: 'center', flexWrap: 'wrap', display: { xs: 'none', md: 'flex' } }}
+      >
         <RiskLegend dense />
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           No shading = low risk
