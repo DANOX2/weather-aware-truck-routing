@@ -1,36 +1,30 @@
 import type { Checkpoint, Heatmap, Route } from '../api/types.ts'
 import { riskColors } from '../theme.ts'
 
-// Continuous risk index (0–4) → colour. Stops sit on the risk levels, so the heatmap and the
-// checkpoint dots always agree. Low risk stays unshaded (shading only starts just below the
-// Moderate threshold), so a tint always means "Moderate or worse".
-const STOPS: Array<[number, string, number]> = [
-  [0, riskColors.MODERATE, 0],
-  [0.8, riskColors.MODERATE, 0],
-  [1, riskColors.MODERATE, 120],
-  [2, riskColors.HIGH, 160],
-  [3, riskColors.SEVERE, 190],
-  [4, riskColors.NO_TRAVEL, 210],
+// Continuous risk index (0–4) → colour. Each level keeps its own hue, so a cell's colour is
+// exactly its checkpoint level (the same as the dots and the legend); a higher position inside
+// the level only deepens the opacity. Blending hues between levels made the top of Moderate
+// look High. Low stays unshaded, so a tint always means "Moderate or worse".
+const LEVELS: Array<[string, number, number]> = [
+  // [colour, alpha at the bottom of the level, alpha at the top]
+  [riskColors.MODERATE, 110, 150],
+  [riskColors.HIGH, 150, 180],
+  [riskColors.SEVERE, 180, 205],
+  [riskColors.NO_TRAVEL, 210, 210],
 ]
 const UPSCALE = 8 // cells → pixels before bilinear smoothing
 
 function hexToRgb(hex: string): [number, number, number] {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number]
 }
-const STOP_RGB = STOPS.map(([, hex]) => hexToRgb(hex))
+const LEVEL_RGB = LEVELS.map(([hex]) => hexToRgb(hex))
 
 export function colorForIndex(index: number): [number, number, number, number] {
-  let i = 0
-  while (i < STOPS.length - 2 && index >= STOPS[i + 1][0]) i++
-  const [from, to] = [STOPS[i][0], STOPS[i + 1][0]]
-  const t = Math.min(Math.max((index - from) / (to - from), 0), 1)
-  const [a, b] = [STOP_RGB[i], STOP_RGB[i + 1]]
-  return [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-    STOPS[i][2] + (STOPS[i + 1][2] - STOPS[i][2]) * t,
-  ]
+  if (index < 1) return [...LEVEL_RGB[0], 0]
+  const level = Math.min(Math.floor(index), LEVELS.length) - 1
+  const t = Math.min(index - 1 - level, 1)
+  const [, from, to] = LEVELS[level]
+  return [...LEVEL_RGB[level], from + (to - from) * t]
 }
 
 export interface HeatmapFrames {
