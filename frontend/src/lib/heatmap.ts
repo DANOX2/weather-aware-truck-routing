@@ -1,4 +1,4 @@
-import type { Heatmap, Route } from '../api/types.ts'
+import type { Checkpoint, Heatmap, Route } from '../api/types.ts'
 import { riskColors } from '../theme.ts'
 
 // Continuous risk index (0–4) → colour. Stops sit on the risk levels, so the heatmap and the
@@ -37,6 +37,12 @@ export interface HeatmapFrames {
   frames: HTMLCanvasElement[] // one per forecast hour
   bounds: [number, number, number, number] // [west, south, east, north]
   start: number // unix seconds of frame 0
+  timeline: HourSummary[] // one per forecast hour, for the risk-over-time chart
+}
+
+export interface HourSummary {
+  atRisk: number // share of corridor cells at Moderate or worse, 0–1
+  worst: number // highest risk index anywhere in the corridor that hour
 }
 
 /** Decode the packed API payload and paint one smoothed image per hour. */
@@ -44,6 +50,7 @@ export function buildFrames(heatmap: Heatmap): HeatmapFrames {
   const { grid, cells, hours, index_scale: scale } = heatmap
   const bytes = Uint8Array.from(atob(heatmap.values), (c) => c.charCodeAt(0))
   const frames: HTMLCanvasElement[] = []
+  const timeline: HourSummary[] = []
 
   // One transparent cell of padding on each side, so smoothing fades out at the edges.
   const width = grid.nx + 2
@@ -55,13 +62,19 @@ export function buildFrames(heatmap: Heatmap): HeatmapFrames {
 
   for (let h = 0; h < hours; h++) {
     const image = smallCtx.createImageData(width, height)
+    let atRisk = 0
+    let worst = 0
     cells.forEach((cell, k) => {
       const row = Math.floor(cell / grid.nx)
       const col = cell % grid.nx + 1
       const y = grid.ny - row // cells count from the south; images from the top (+1 padding)
-      const [r, g, b, a] = colorForIndex(bytes[h * cells.length + k] / scale)
+      const index = bytes[h * cells.length + k] / scale
+      if (index >= 1) atRisk++
+      worst = Math.max(worst, index)
+      const [r, g, b, a] = colorForIndex(index)
       image.data.set([r, g, b, a], (y * width + col) * 4)
     })
+    timeline.push({ atRisk: cells.length ? atRisk / cells.length : 0, worst })
     smallCtx.putImageData(image, 0, 0)
 
     const frame = document.createElement('canvas')
@@ -83,22 +96,31 @@ export function buildFrames(heatmap: Heatmap): HeatmapFrames {
       grid.lat0 + (grid.ny + 1) * grid.cell_deg,
     ],
     start: heatmap.start,
+    timeline,
   }
 }
 
+export type TruckStatus =
+  | { phase: 'before' | 'arrived' }
+  | { phase: 'en-route'; position: [number, number]; mile: number; checkpoint: Checkpoint }
+
 /** Where the truck is on a route at a unix time, interpolated between checkpoints. */
-export function truckPosition(route: Route, unixSeconds: number): [number, number] | null {
+export function truckStatus(route: Route, unixSeconds: number): TruckStatus {
   const cps = route.checkpoints
   const times = cps.map((cp) => Date.parse(cp.eta) / 1000)
-  if (unixSeconds < times[0] || unixSeconds > times[times.length - 1]) return null
+  if (unixSeconds < times[0]) return { phase: 'before' }
+  if (unixSeconds > times[times.length - 1]) return { phase: 'arrived' }
   const i = Math.max(
-    0,
+    1,
     times.findIndex((t) => t >= unixSeconds),
   )
-  if (i === 0) return [cps[0].lon, cps[0].lat]
+  const [a, b] = [cps[i - 1], cps[i]]
   const t = (unixSeconds - times[i - 1]) / (times[i] - times[i - 1] || 1)
-  return [
-    cps[i - 1].lon + (cps[i].lon - cps[i - 1].lon) * t,
-    cps[i - 1].lat + (cps[i].lat - cps[i - 1].lat) * t,
-  ]
+  return {
+    phase: 'en-route',
+    position: [a.lon + (b.lon - a.lon) * t, a.lat + (b.lat - a.lat) * t],
+    mile: a.mile + (b.mile - a.mile) * t,
+    // The checkpoint whose stretch of road the truck is on (each covers half-way to neighbours).
+    checkpoint: t < 0.5 ? a : b,
+  }
 }

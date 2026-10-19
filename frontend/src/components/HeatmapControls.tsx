@@ -10,19 +10,46 @@ import {
   Stack,
   Switch,
   Typography,
+  useMediaQuery,
 } from '@mui/material'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
+import type { HourSummary } from '../lib/heatmap.ts'
 import { formatTime } from '../lib/format.ts'
-import { monoFont } from '../theme.ts'
+import { monoFont, tokens } from '../theme.ts'
 import { RiskLegend } from './RiskLegend.tsx'
+import { RiskTimeline } from './RiskTimeline.tsx'
 
 const MAX_HOUR = 48
 const STEP = 0.25 // quarter-hour steps; the map cross-fades between forecast hours
 const PLAY_HOURS_PER_SECOND = 4
 
+const hourFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric' })
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' })
+
+/** Slider ticks on local clock hours (every 6 h, or 12 h on phones); midnight shows the day. */
+function clockTicks(start: number, stepHours: number) {
+  const ticks = []
+  const first = new Date(start * 1000)
+  first.setMinutes(0, 0, 0)
+  for (let d = first; ; d = new Date(d.getTime() + 3600_000)) {
+    const value = (d.getTime() / 1000 - start) / 3600
+    if (value > MAX_HOUR - 1.5) break
+    if (value < 1.5 || d.getHours() % stepHours) continue
+    ticks.push({ value, label: d.getHours() ? hourFmt.format(d) : dayFmt.format(d) })
+  }
+  return ticks
+}
+
+export interface TruckStatusLine {
+  text: string
+  color: string | null // risk colour of the truck's stretch of road, when en route
+}
+
 interface Props {
   start: number | null // unix seconds of hour 0; null while loading
+  timeline: HourSummary[] | null
+  status: TruckStatusLine | null
   hour: number
   onHour: (hour: number) => void
   playing: boolean
@@ -37,6 +64,8 @@ interface Props {
 
 export function HeatmapControls({
   start,
+  timeline,
+  status,
   hour,
   onHour,
   playing,
@@ -71,11 +100,13 @@ export function HeatmapControls({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing])
 
-  const label = start === null ? '' : formatTime(new Date((start + hour * 3600) * 1000).toISOString())
-  const marks = [
-    ...(departHour !== null ? [{ value: departHour, label: 'Depart' }] : []),
-    ...(arriveHour !== null && arriveHour <= MAX_HOUR ? [{ value: arriveHour, label: 'Arrive' }] : []),
-  ]
+  const compact = useMediaQuery((theme) => theme.breakpoints.down('md'))
+  const marks = useMemo(
+    () => (start === null ? [] : clockTicks(start, compact ? 12 : 6)),
+    [start, compact],
+  )
+  const label =
+    start === null ? '' : formatTime(new Date((start + hour * 3600) * 1000).toISOString())
 
   return (
     <Paper
@@ -110,11 +141,41 @@ export function HeatmapControls({
           <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.3 }} noWrap>
             Weather risk {label && `· ${label}`}
           </Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: monoFont }}>
-            {error
-              ? "Couldn't load the forecast heatmap"
-              : `+${Math.floor(hour)} h from now`}
-          </Typography>
+          <Stack direction="row" spacing={0.75} sx={{ alignItems: 'baseline', minWidth: 0 }}>
+            <Typography
+              variant="caption"
+              sx={{ color: 'text.secondary', fontFamily: monoFont, flexShrink: 0 }}
+            >
+              {`+${Math.floor(hour)} h`}
+            </Typography>
+            {!error && status?.color && (
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  alignSelf: 'flex-start',
+                  mt: '6px',
+                  borderRadius: '50%',
+                  bgcolor: status.color,
+                  flexShrink: 0,
+                }}
+              />
+            )}
+            {/* Phones get two fixed lines so the panel never changes height during playback. */}
+            <Typography
+              variant="caption"
+              sx={{
+                color: 'text.secondary',
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitBoxOrient: 'vertical',
+                WebkitLineClamp: { xs: 2, md: 1 },
+                minHeight: { xs: '2lh', md: 0 },
+              }}
+            >
+              {error ? "Couldn't load the forecast heatmap" : status?.text}
+            </Typography>
+          </Stack>
         </Box>
         {loading && <CircularProgress size={16} aria-label="Loading heatmap" />}
         <FormControlLabel
@@ -126,7 +187,19 @@ export function HeatmapControls({
         />
       </Stack>
 
-      <Box sx={{ px: 1 }}>
+      <Box sx={{ px: 1, mt: 1 }}>
+        {timeline && (
+          <RiskTimeline
+            timeline={timeline}
+            maxHour={MAX_HOUR}
+            departHour={departHour}
+            arriveHour={arriveHour}
+            onHour={(h) => {
+              onPlaying(false)
+              onHour(h)
+            }}
+          />
+        )}
         <Slider
           aria-label="Forecast hour"
           value={hour}
@@ -140,11 +213,19 @@ export function HeatmapControls({
             onHour(value as number)
           }}
           valueLabelDisplay="off"
-          getAriaValueText={() => label}
+          getAriaValueText={() => (status ? `${label}. ${status.text}` : label)}
+          track={false}
           sx={{
-            mt: 0.5,
+            mt: -0.5,
             mb: marks.length ? 2 : 0,
-            '& .MuiSlider-markLabel': { fontSize: 11, color: 'text.secondary' },
+            '& .MuiSlider-rail': { opacity: 0.25 },
+            '& .MuiSlider-mark': { height: 6, width: '1px', bgcolor: tokens.textMuted, opacity: 0.4 },
+            '& .MuiSlider-markLabel': {
+              fontSize: 11,
+              fontFamily: monoFont,
+              color: 'text.secondary',
+              top: { xs: 22, md: 26 },
+            },
             '& .MuiSlider-thumb': { transition: 'none' },
             '& .MuiSlider-track': { transition: 'none' },
           }}
@@ -158,7 +239,7 @@ export function HeatmapControls({
       >
         <RiskLegend dense />
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          No shading = low risk
+          No shading = low risk · bars = share of the corridor at risk each hour
         </Typography>
       </Stack>
     </Paper>

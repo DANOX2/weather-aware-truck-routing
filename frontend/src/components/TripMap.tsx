@@ -16,10 +16,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { Checkpoint, Heatmap, Route, Trip } from '../api/types.ts'
 import { describeCause } from '../lib/explain.ts'
-import { buildFrames, truckPosition } from '../lib/heatmap.ts'
+import { buildFrames, truckStatus } from '../lib/heatmap.ts'
 import { RISK_LABEL, ROUTE_NAMES, formatTime } from '../lib/format.ts'
 import { riskColors, routeColors, tokens } from '../theme.ts'
-import { HeatmapControls } from './HeatmapControls.tsx'
+import { HeatmapControls, type TruckStatusLine } from './HeatmapControls.tsx'
 
 setWorkerUrl(workerUrl)
 
@@ -216,6 +216,10 @@ export default function TripMap({
     ]
   }, [trip, focusId, onSelect, onHover])
 
+  const truck = frames && focusRoute ? truckStatus(focusRoute, frames.start + hour * 3600) : null
+  const statusLine = trip && focusRoute && truck ? describeTruck(trip, focusRoute, truck) : null
+  const truckAt = truck?.phase === 'en-route' ? truck.position : null
+
   // Per-frame layers: two forecast hours cross-faded, plus the truck at that moment.
   useEffect(() => {
     // One layer per forecast hour keeps each image on the GPU after its first upload;
@@ -232,15 +236,13 @@ export default function TripMap({
           opacity: i === upper && upper !== lower ? hour - lower : 1,
         }),
     )
-    const truck =
-      frames && focusRoute ? truckPosition(focusRoute, frames.start + hour * 3600) : null
     overlay.current?.setProps({
       layers: [
         ...frameLayers,
         ...routeLayers,
         new ScatterplotLayer<[number, number]>({
           id: 'truck',
-          data: truck ? [truck] : [],
+          data: truckAt ? [truckAt] : [],
           getPosition: (d) => d,
           getFillColor: [255, 255, 255, 255],
           getRadius: 7,
@@ -253,7 +255,7 @@ export default function TripMap({
         }),
       ],
     })
-  }, [routeLayers, frames, heatVisible, hour, focusRoute])
+  }, [routeLayers, frames, heatVisible, hour, focusRoute, truckAt])
 
   return (
     <Box sx={{ position: 'absolute', inset: 0 }} onMouseLeave={() => setTooltip(null)}>
@@ -263,6 +265,8 @@ export default function TripMap({
       {trip && (
         <HeatmapControls
           start={start}
+          timeline={frames?.timeline ?? null}
+          status={statusLine}
           hour={hour}
           onHour={setHour}
           playing={playing}
@@ -282,6 +286,29 @@ export default function TripMap({
 }
 
 const TOOLTIP_WIDTH = 260
+
+/** The heatmap's status line: where the focused route's truck is at the slider's hour, and why. */
+function describeTruck(
+  trip: Trip,
+  route: Route,
+  truck: ReturnType<typeof truckStatus>,
+): TruckStatusLine {
+  const name = `Route ${ROUTE_NAMES[route.id]}`
+  if (truck.phase !== 'en-route') {
+    const text =
+      truck.phase === 'before'
+        ? `Before departure · ${name} leaves ${formatTime(route.departure)}`
+        : `${name} arrived ${formatTime(route.arrival)} · corridor forecast only`
+    return { text, color: null }
+  }
+  const cp = truck.checkpoint
+  const cause = describeCause(cp, trip.weight_lb, trip.wind_metric)
+  const level = cp.level ? `${RISK_LABEL[cp.level]}: ${cause}` : cause
+  return {
+    text: `${name} · mile ${Math.round(truck.mile)} · ${level}`,
+    color: cp.level ? riskColors[cp.level] : null,
+  }
+}
 
 function clampHour(hour: number) {
   return Math.min(Math.max(hour, 0), 48)
