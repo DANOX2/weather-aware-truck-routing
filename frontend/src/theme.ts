@@ -26,6 +26,11 @@ export const riskColors = {
   NO_TRAVEL: '#AF270D',
 } as const
 
+// Route identity colours: distinct from every risk colour and from each other on the dark map.
+export const routeColors = ['#40E0D0', '#7AA2FF', '#D59BFF', '#F5F5F5', '#FFD3A8'] as const
+
+export const monoFont = '"DM Mono", ui-monospace, monospace'
+
 export const theme = createTheme({
   palette: {
     mode: 'dark',

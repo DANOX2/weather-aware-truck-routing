@@ -160,7 +160,7 @@ Heatmap performance plan:
 | **P0 Setup** | Research, decisions, project skeleton, CI, roadmap | 1.0 h | Day 1 ✅ |
 | **P1 Domain core** ✅ | `risk.py` + boundary-table tests · TomTom + Open-Meteo clients with caching · checkpoint sampling, ETAs and ranking ("why" data included) with tests | 3.0 h | Day 1 |
 | **P2 API** ✅ | `/trips`, `/geocode`, `/heatmap`; request checks; clear error codes the UI can turn into messages | 1.0 h | Day 2 |
-| **P3a UI: plan** | Trip form meeting R1–R3 criteria · route cards with "why it won" and risk strip | 2.0 h | Day 2 |
+| **P3a UI: plan** ✅ | Trip form meeting R1–R3 criteria · route cards with "why it won" and risk strip | 2.0 h | Day 2 |
 | **P3b UI: map** | R8 criteria: route ↔ card highlighting, checkpoint tooltips explaining the cause, legend, camera | 2.0 h | Day 2–3 |
 | **P3c UI: heatmap** | R9 criteria: corridor raster, 60 fps slider, play, departure/arrival markers | 2.0 h | Day 3 |
 | **P3d UX polish** | Go through §2.2–2.3 item by item: every state, keyboard, responsive, contrast, shareable URL, small transitions | **1.5 h** | Day 3 |
@@ -211,6 +211,8 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
 - **2026-10-19**: Measured one TomTom call for Dallas → Denver: 7.4 s with `maxAlternatives=5`, 1.8 s without. Switched to parallel main + detour requests. **Cold trip plan: 9.4 s → 3.8 s** with 3 TomTom requests.
 - **2026-10-19**: Open-Meteo counts **each location as one call** (10k/day, 600/min, per IP; Cloud Run's outbound IPs are shared). The heatmap only fetches a corridor of cells around the routes, at most 300 (Dallas → Denver: 200 cells at 0.5°). The heatmap score is continuous, and its integer part always equals the checkpoint level (tested across a sweep of conditions).
 - **2026-10-19**: Live API on Dallas → Denver: `/trips` **3.6 s** cold, 52 KB (9.6 KB gzipped) · `/heatmap` **0.8 s** cold / 69 ms cached, 14 KB for all 49 hours.
+- **2026-10-19**: Shorter trips can have fewer than 3 truck routes (Houston → New Orleans: 1; Albuquerque → Denver: 2) because the detours fail the time or overlap filters. The UI says so plainly. Possible tuning: adapt the detour offset to trip length.
+- **2026-10-19**: For the Loom, scan the live US forecast on recording day (coarse grid, ~230 Open-Meteo calls) and pick a trip that crosses real hazardous weather. Hazards are local, so check the trip with the real checkpoints before recording.
 
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)
