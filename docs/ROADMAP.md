@@ -158,8 +158,8 @@ Heatmap performance plan:
 | Phase | Scope | Budget | Day |
 |---|---|---|---|
 | **P0 Setup** | Research, decisions, project skeleton, CI, roadmap | 1.0 h | Day 1 ✅ |
-| **P1 Domain core** | `risk.py` + boundary-table tests · TomTom + Open-Meteo clients with caching · checkpoint sampling, ETAs and ranking ("why" data included) with tests | 3.0 h | Day 1 |
-| **P2 API** | `/trips`, `/geocode`, `/heatmap`; request checks; clear error codes the UI can turn into messages | 1.0 h | Day 2 |
+| **P1 Domain core** ✅ | `risk.py` + boundary-table tests · TomTom + Open-Meteo clients with caching · checkpoint sampling, ETAs and ranking ("why" data included) with tests | 3.0 h | Day 1 |
+| **P2 API** ✅ | `/trips`, `/geocode`, `/heatmap`; request checks; clear error codes the UI can turn into messages | 1.0 h | Day 2 |
 | **P3a UI: plan** | Trip form meeting R1–R3 criteria · route cards with "why it won" and risk strip | 2.0 h | Day 2 |
 | **P3b UI: map** | R8 criteria: route ↔ card highlighting, checkpoint tooltips explaining the cause, legend, camera | 2.0 h | Day 2–3 |
 | **P3c UI: heatmap** | R9 criteria: corridor raster, 60 fps slider, play, departure/arrival markers | 2.0 h | Day 3 |
@@ -209,6 +209,8 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
 - **2026-10-19**: A live Dallas → Denver trip takes **9.4 s cold** (target < 4 s). The provider calls run one after another. → In P4, run the detour and weather calls in parallel. The response is 55 KB with paths simplified to ~250 points.
 - **2026-10-19**: "Why it won" now explains the winner against **each** alternative. Comparing only with the runner-up hid the safety reason whenever the two best routes were both calm.
 - **2026-10-19**: Measured one TomTom call for Dallas → Denver: 7.4 s with `maxAlternatives=5`, 1.8 s without. Switched to parallel main + detour requests. **Cold trip plan: 9.4 s → 3.8 s** with 3 TomTom requests.
+- **2026-10-19**: Open-Meteo counts **each location as one call** (10k/day, 600/min, per IP; Cloud Run's outbound IPs are shared). The heatmap only fetches a corridor of cells around the routes, at most 300 (Dallas → Denver: 200 cells at 0.5°). The heatmap score is continuous, and its integer part always equals the checkpoint level (tested across a sweep of conditions).
+- **2026-10-19**: Live API on Dallas → Denver: `/trips` **3.6 s** cold, 52 KB (9.6 KB gzipped) · `/heatmap` **0.8 s** cold / 69 ms cached, 14 KB for all 49 hours.
 
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)

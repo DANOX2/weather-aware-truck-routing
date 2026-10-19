@@ -40,12 +40,19 @@ class HourlyForecast:
         return i if 0 <= i < len(self.wind_mph) else None
 
 
-def snap(lat: float, lon: float) -> tuple[float, float]:
-    return (round(lat / GRID_DEG) * GRID_DEG, round(lon / GRID_DEG) * GRID_DEG)
+def snap(lat: float, lon: float, grid_deg: float = GRID_DEG) -> tuple[float, float]:
+    return (
+        round(round(lat / grid_deg) * grid_deg, 4),
+        round(round(lon / grid_deg) * grid_deg, 4),
+    )
+
+
+def _fmt(value: float) -> str:
+    return f"{value:.4f}".rstrip("0").rstrip(".")
 
 
 def _cache_key(point: tuple[float, float]) -> str:
-    return f"om:v1:{point[0]:.1f}:{point[1]:.1f}"
+    return f"om:v2:{point[0]:.4f}:{point[1]:.4f}"
 
 
 def _parse(payload: dict) -> HourlyForecast:
@@ -67,8 +74,8 @@ def _parse(payload: dict) -> HourlyForecast:
 
 def _fetch_batch(client: httpx.Client, points: list[tuple[float, float]]) -> list[HourlyForecast]:
     params = {
-        "latitude": ",".join(f"{p[0]:.1f}" for p in points),
-        "longitude": ",".join(f"{p[1]:.1f}" for p in points),
+        "latitude": ",".join(_fmt(p[0]) for p in points),
+        "longitude": ",".join(_fmt(p[1]) for p in points),
         "hourly": HOURLY_VARS,
         "wind_speed_unit": "mph",
         "precipitation_unit": "inch",
@@ -90,10 +97,13 @@ def _fetch_batch(client: httpx.Client, points: list[tuple[float, float]]) -> lis
 
 
 def get_forecasts(
-    coords: list[tuple[float, float]],
+    coords: list[tuple[float, float]], grid_deg: float = GRID_DEG
 ) -> dict[tuple[float, float], HourlyForecast]:
-    """Forecasts keyed by snapped coordinate. Use `snap()` to look results up."""
-    wanted = list(dict.fromkeys(snap(lat, lon) for lat, lon in coords))
+    """Forecasts keyed by snapped coordinate. Use `snap(..., grid_deg)` to look results up.
+
+    Every location counts as one Open-Meteo call, so callers should keep `coords` small.
+    """
+    wanted = list(dict.fromkeys(snap(lat, lon, grid_deg) for lat, lon in coords))
     cached = cache.get_many([_cache_key(p) for p in wanted])
     result = {p: cached[_cache_key(p)] for p in wanted if _cache_key(p) in cached}
     missing = [p for p in wanted if p not in result]
