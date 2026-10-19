@@ -109,7 +109,7 @@ These go in the README as well, so reviewers see the choices were deliberate.
 |---|---|---|
 | T1 | **React 19 + Vite 8 + TypeScript + MUI 9** | Spotter's job post asks for React + MUI. Vite is the current standard. |
 | T2 | **Django 6.1 + DRF 3.18 on Python 3.13**, managed with **uv** | Latest stable versions that work together. DRF is named in the job post. |
-| T3 | **TomTom Routing API** (`travelMode=truck`, `vehicleWeight`, `maxAlternatives=2`, `departAt`, `extendedRouteRepresentation=travelTime`) + TomTom Search for geocoding | Truck-aware, takes load weight, returns alternatives and **gives travel time at every point** (A9). Free tier, no card. ❌ OpenRouteService was rejected: its public API limits alternative routes to < 100 km. |
+| T3 | **TomTom Routing API**: `travelMode=truck` with `vehicleWeight` and `extendedRouteRepresentation=travelTime`. **The main route and detour routes through offset waypoints are requested in parallel** (TomTom's own alternatives cost about +5.5 s). TomTom Search for geocoding. | Truck-aware, takes the load weight, gives travel time along the route (A9). Free tier with no card, 2,500 requests/day. ❌ OpenRouteService: alternatives limited to < 100 km. Also compared: HERE (strong; kept as plan B), Google (truck routing probably at the Enterprise tier), Mapbox (no truck mode). |
 | T4 | **Open-Meteo** for weather | No API key, hourly 0–48 h forecasts, many coordinates per request, returns mph and inches. |
 | T5 | **MapLibre GL 6 + deck.gl 9**, CARTO Dark Matter basemap | Drawn on the GPU (needed for the 40% performance grade), no key needed, the dark map matches Spotter's navy UI. |
 | T6 | **TanStack Query** for server state, React state/context for UI state | Small and well known. No Redux needed. |
@@ -117,12 +117,12 @@ These go in the README as well, so reviewers see the choices were deliberate.
 | T8 | One **Docker image**: Django + WhiteNoise serves the built SPA | Single deploy, no CORS in production, quick to host. |
 | T9 | **Spotter's visual language** (navy `#061830`, turquoise `#40E0D0`, coral `#F84960`, DM Sans, Lens-style cold→hot heat scale). See `docs/brand.md` | The app should look like it already belongs in their product suite. |
 | T10 | **ruff + pytest** (backend), **oxlint + tsc** (frontend), GitHub Actions CI | Covers the 15% code-quality grade at almost no cost. |
+| T11 | **Hosting: GCP Cloud Run (primary) + Railway (backup)**, both running the same Docker image (port from `$PORT`, Redis optional) | Cloud Run matches Spotter's GCP. Railway is the quickest fallback if GCP setup blocks us. On Cloud Run we skip Redis (managed Redis starts around $35/mo), so each instance keeps its own in-memory cache. |
 
 ### Waiting on you
 | ID | Decision | Recommendation | Blocks |
 |---|---|---|---|
 | P1 | **TomTom API key**: sign up at developer.tomtom.com (≈5 min) and put the key in `backend/.env` | — | Phase 1, real routes (can use mocks until then) |
-| P2 | **Hosting**: GCP Cloud Run (Spotter uses GCP; needs a billing account; cold start ≈ 2 s) **vs** Render free tier (cold start ≈ 50 s, which hurts the performance grade) **vs** Railway/Fly (≈ $5) | Cloud Run if you have billing, otherwise Railway | Phase 4 |
 | P3 | **Repo visibility**: private while building, public at submission | Private now → public on Day 3 | Repo creation |
 | P4 | GitHub auth on this machine: run `! gh auth login` | — | First push |
 
@@ -208,6 +208,7 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
 - **2026-10-19**: TomTom's `progress` is sparse (~80 entries for ~10k points). ETAs are interpolated between entries.
 - **2026-10-19**: A live Dallas → Denver trip takes **9.4 s cold** (target < 4 s). The provider calls run one after another. → In P4, run the detour and weather calls in parallel. The response is 55 KB with paths simplified to ~250 points.
 - **2026-10-19**: "Why it won" now explains the winner against **each** alternative. Comparing only with the runner-up hid the safety reason whenever the two best routes were both calm.
+- **2026-10-19**: Measured one TomTom call for Dallas → Denver: 7.4 s with `maxAlternatives=5`, 1.8 s without. Switched to parallel main + detour requests. **Cold trip plan: 9.4 s → 3.8 s** with 3 TomTom requests.
 
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)

@@ -1,8 +1,9 @@
 """TomTom truck routing and place search.
 
-Quota-conscious by design (free tier ≈ 2,500 requests/day):
-- one routing call returns up to 5 alternatives; extra detour calls only happen
-  when fewer than 3 distinct, reasonable routes come back;
+Speed and quota (free tier ≈ 2,500 requests/day):
+- TomTom's own `maxAlternatives` adds ~5.5 s on long trips (7.4 s vs 1.8 s measured),
+  so we instead fire the main route and detour routes through offset via-points
+  in parallel: 3 requests and ~2 s; a second wave of 2 only when needed;
 - routes and searches are cached, so re-sampling at another interval is free.
 """
 
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import quote
@@ -28,7 +30,8 @@ KG_PER_LB = 0.45359237
 ROUTES_WANTED = 3
 MAX_TIME_RATIO = 1.5  # drop alternatives slower than 1.5× the fastest
 MAX_OVERLAP = 0.7  # routes sharing more than this share of 0.1° cells are duplicates
-DETOUR_OFFSET = 0.15  # via-point offset from the midpoint, as a share of crow-fly length
+# Via-point offsets from the midpoint, as a share of crow-fly length: one wave per tuple.
+DETOUR_WAVES = ((0.15,), (0.30,))
 OVERLAP_CELL_DEG = 0.1
 
 ROUTE_CACHE_TTL_S = 10 * 60  # traffic-aware, so keep it short
@@ -192,7 +195,7 @@ def select_routes(candidates: list[Route], wanted: int = ROUTES_WANTED) -> list[
     return chosen
 
 
-def detour_points(origin: LatLon, destination: LatLon) -> list[LatLon]:
+def detour_points(origin: LatLon, destination: LatLon, offset_share: float) -> list[LatLon]:
     """Via-points either side of the crow-fly midpoint, used to force distinct corridors."""
     mid_lat = (origin[0] + destination[0]) / 2
     mid_lon = (origin[1] + destination[1]) / 2
@@ -204,7 +207,7 @@ def detour_points(origin: LatLon, destination: LatLon) -> list[LatLon]:
         return []
     points = []
     for side in (1, -1):
-        offset = DETOUR_OFFSET * length * side
+        offset = offset_share * length * side
         points.append(
             (mid_lat - dlon / length * offset, mid_lon + dlat / length * offset / cos_lat)
         )
@@ -229,15 +232,28 @@ def _locations(*points: LatLon) -> str:
     return ":".join(f"{lat:.5f},{lon:.5f}" for lat, lon in points)
 
 
+def _fetch_parallel(
+    client: httpx.Client, base: list, legs: list[tuple[LatLon, ...]]
+) -> list[dict | RoutingProviderError]:
+    def fetch(points: tuple[LatLon, ...]) -> dict | RoutingProviderError:
+        try:
+            return _get(client, ROUTING_URL.format(locations=_locations(*points)), base)
+        except RoutingProviderError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=len(legs)) as pool:
+        return list(pool.map(fetch, legs))
+
+
 def get_routes(
     origin: LatLon, destination: LatLon, depart_at: datetime | None, weight_lb: float
 ) -> list[Route]:
-    """Up to 3 distinct truck routes, fastest-first as TomTom orders them.
+    """Up to 3 distinct truck routes: TomTom's best route first, then the fastest detours.
 
     `depart_at=None` means "now". Cached for 10 minutes per (points, 15-min slot, 1,000-lb bucket).
     """
     slot = depart_at.replace(minute=depart_at.minute // 15 * 15, second=0) if depart_at else None
-    key = "tt:routes:v1:{}:{}:{}".format(
+    key = "tt:routes:v2:{}:{}:{}".format(
         _locations(origin, destination),
         slot.isoformat() if slot else "now",
         round(weight_lb / 1000),
@@ -246,24 +262,28 @@ def get_routes(
         return hit
 
     base = _routing_params(depart_at, weight_lb)
+    main: list[Route] = []
+    detours: list[Route] = []
+    routes: list[Route] = []
     with httpx.Client(timeout=settings.PROVIDER_TIMEOUT_S) as client:
-        data = _get(
-            client,
-            ROUTING_URL.format(locations=_locations(origin, destination)),
-            [*base, ("maxAlternatives", "5"), ("alternativeType", "anyRoute")],
-        )
-        candidates = [_parse_route(r) for r in data.get("routes", [])]
-        routes = select_routes(candidates)
+        for wave, offsets in enumerate(DETOUR_WAVES):
+            vias = [v for share in offsets for v in detour_points(origin, destination, share)]
+            legs = [(origin, v, destination) for v in vias]
+            if wave == 0:
+                legs.insert(0, (origin, destination))
+            results = _fetch_parallel(client, base, legs)
 
-        for via in detour_points(origin, destination) if len(routes) < ROUTES_WANTED else []:
-            try:
-                detour = _get(
-                    client, ROUTING_URL.format(locations=_locations(origin, via, destination)), base
-                )
-            except RoutingProviderError:
-                continue  # a detour is a nice-to-have; never fail the trip over it
-            candidates += [_parse_route(r, via_detour=True) for r in detour.get("routes", [])]
-            routes = select_routes(candidates)
+            if wave == 0:
+                first = results.pop(0)
+                if isinstance(first, RoutingProviderError):
+                    raise first  # the main route is required; detours are best-effort
+                main = [_parse_route(r) for r in first.get("routes", [])]
+            for result in results:
+                if not isinstance(result, RoutingProviderError):
+                    detours += [_parse_route(r, via_detour=True) for r in result.get("routes", [])]
+
+            # Faster detours first, so the most practical alternatives win the remaining slots.
+            routes = select_routes(main + sorted(detours, key=lambda r: r.duration_s))
             if len(routes) == ROUTES_WANTED:
                 break
 

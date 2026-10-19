@@ -86,63 +86,75 @@ def test_select_drops_duplicates_and_slow_outliers():
 
 
 def test_detour_points_sit_either_side_of_midpoint():
-    east, west = detour_points((30.0, -100.0), (40.0, -100.0))  # due north trip
+    east, west = detour_points((30.0, -100.0), (40.0, -100.0), 0.15)  # due north trip
     assert east[0] == pytest.approx(35.0) and west[0] == pytest.approx(35.0)
     assert east[1] > -100.0 > west[1]
+    assert detour_points((30.0, -100.0), (40.0, -100.0), 0.30)[0][1] > east[1]
+
+
+def _points(request) -> list[tuple[float, float]]:
+    locations = request.url.path.split("/calculateRoute/")[1].removesuffix("/json")
+    return [tuple(map(float, p.split(","))) for p in locations.split(":")]
+
+
+def corridor_by_via(fail_vias=(), hours=11.0):
+    """Main route on the straight corridor; each detour follows its via-point's longitude."""
+    failing = {(round(lat, 5), round(lon, 5)) for lat, lon in fail_vias}
+
+    def handler(request):
+        points = _points(request)
+        if len(points) == 2:
+            return httpx.Response(200, json={"routes": [raw_route(0, hours=10)]})
+        if points[1] in failing:
+            return httpx.Response(500)
+        via_lon_offset = points[1][1] - DALLAS[1]
+        return httpx.Response(200, json={"routes": [raw_route(via_lon_offset, hours=hours)]})
+
+    return handler
 
 
 @respx.mock
-def test_one_call_when_provider_returns_enough_alternatives():
-    ROUTING.mock(
-        return_value=httpx.Response(
-            200, json={"routes": [raw_route(0), raw_route(1), raw_route(-1)]}
-        )
-    )
+def test_first_wave_is_main_plus_two_detours_in_parallel():
+    ROUTING.mock(side_effect=corridor_by_via())
     routes = get_routes(DALLAS, DENVER, None, 40_000)
     assert len(routes) == 3
-    assert ROUTING.call_count == 1
+    assert ROUTING.call_count == 3
+    assert [r.via_detour for r in routes] == [False, True, True]
     params = ROUTING.calls[0].request.url.params
     assert params["travelMode"] == "truck"
     assert params["vehicleWeight"] == "18144"  # 40,000 lb in kg
-    assert params["maxAlternatives"] == "5"
+    assert "maxAlternatives" not in params  # adds ~5.5 s on long trips
 
 
 @respx.mock
-def test_detour_fills_in_missing_third_route():
-    ROUTING.mock(
-        side_effect=[
-            httpx.Response(200, json={"routes": [raw_route(0), raw_route(1)]}),
-            httpx.Response(200, json={"routes": [raw_route(-1, hours=11)]}),
-        ]
-    )
+def test_second_wave_only_when_first_falls_short():
+    ROUTING.mock(side_effect=corridor_by_via(fail_vias=detour_points(DALLAS, DENVER, 0.15)))
     routes = get_routes(DALLAS, DENVER, None, 40_000)
     assert len(routes) == 3
-    assert routes[2].via_detour is True
-    assert ROUTING.call_count == 2  # second detour not needed
+    assert ROUTING.call_count == 5
 
 
 @respx.mock
-def test_failed_detour_still_returns_what_we_have():
-    ROUTING.mock(
-        side_effect=[
-            httpx.Response(200, json={"routes": [raw_route(0)]}),
-            httpx.Response(500),
-            httpx.Response(500),
-        ]
-    )
-    assert len(get_routes(DALLAS, DENVER, None, 40_000)) == 1
+def test_slow_detours_are_dropped():
+    ROUTING.mock(side_effect=corridor_by_via(hours=16))  # > 1.5× the 10 h main route
+    routes = get_routes(DALLAS, DENVER, None, 40_000)
+    assert [r.via_detour for r in routes] == [False]
+    assert ROUTING.call_count == 5
+
+
+@respx.mock
+def test_main_route_failure_is_an_error():
+    ROUTING.mock(return_value=httpx.Response(500))
+    with pytest.raises(RoutingProviderError):
+        get_routes(DALLAS, DENVER, None, 40_000)
 
 
 @respx.mock
 def test_routes_are_cached_per_15_minute_slot():
-    ROUTING.mock(
-        return_value=httpx.Response(
-            200, json={"routes": [raw_route(0), raw_route(1), raw_route(-1)]}
-        )
-    )
+    ROUTING.mock(side_effect=corridor_by_via())
     get_routes(DALLAS, DENVER, datetime(2026, 10, 20, 8, 1, tzinfo=UTC), 40_000)
     get_routes(DALLAS, DENVER, datetime(2026, 10, 20, 8, 14, tzinfo=UTC), 40_200)
-    assert ROUTING.call_count == 1
+    assert ROUTING.call_count == 3
     assert ROUTING.calls[0].request.url.params["departAt"] == "2026-10-20T08:01:00+00:00"
 
 
