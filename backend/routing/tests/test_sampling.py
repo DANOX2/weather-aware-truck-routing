@@ -1,12 +1,7 @@
 import pytest
 
-from routing.sampling import (
-    METERS_PER_MILE,
-    RouteGeometry,
-    cumulative_distances,
-    haversine_m,
-    sample_checkpoints,
-)
+from routing.geometry import METERS_PER_MILE, cumulative_distances, haversine_m
+from routing.sampling import RouteGeometry, sample_checkpoints
 
 
 def straight_route(miles: float, mph: float = 60.0) -> RouteGeometry:

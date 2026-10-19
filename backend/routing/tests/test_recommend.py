@@ -80,3 +80,4 @@ def test_three_routes_fully_ordered():
         [stats(hours=9, L=90, H=10), stats(hours=10, L=100), stats(hours=8, L=80, S=20)]
     )
     assert ranking.order == [1, 0, 2]
+    assert ranking.winner_beats == {0: "high_miles", 2: "severe_miles"}

@@ -74,6 +74,8 @@ class Ranking:
     order: list[int]  # route indexes, best first
     deciding_criterion: str | None  # what separated #1 from #2; None if one route or a tie
     deciding_label: str | None
+    # For every other route: the criterion on which the winner beat it (None on a full tie).
+    winner_beats: dict[int, str | None]
     all_have_no_travel: bool
 
 
@@ -85,9 +87,11 @@ def rank_routes(stats: Sequence[RouteStats]) -> Ranking:
     if len(order) > 1:
         _, deciding = _compare(stats[order[0]], stats[order[1]])
     label = next((lbl for key, lbl, *_ in CRITERIA if key == deciding), None)
+    winner = order[0] if order else None
     return Ranking(
         order=order,
         deciding_criterion=deciding,
         deciding_label=label,
+        winner_beats={i: _compare(stats[winner], stats[i])[1] for i in order[1:]},
         all_have_no_travel=bool(stats) and all(s.no_travel_mi > MILES_TOLERANCE for s in stats),
     )

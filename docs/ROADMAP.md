@@ -203,6 +203,12 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
 | Hosting cold starts hurt the "performance" impression | Cloud Run / Railway; warm the app before recording the Loom |
 | Going over the 16 h budget | Budget per phase plus the cut rule in §6 |
 
+## 8b. Findings log
+- **2026-10-19**: TomTom sometimes returns only 2 routes (Dallas → Denver) even with `maxAlternatives=5`. Fixed with detour via-points, filtered by overlap (> 0.7 of shared 0.1° cells counts as a duplicate) and by time (> 1.5× the fastest is dropped).
+- **2026-10-19**: TomTom's `progress` is sparse (~80 entries for ~10k points). ETAs are interpolated between entries.
+- **2026-10-19**: A live Dallas → Denver trip takes **9.4 s cold** (target < 4 s). The provider calls run one after another. → In P4, run the detour and weather calls in parallel. The response is 55 KB with paths simplified to ~250 points.
+- **2026-10-19**: "Why it won" now explains the winner against **each** alternative. Comparing only with the runner-up hid the safety reason whenever the two best routes were both calm.
+
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)
 - [ ] R1–R9 work on the hosted URL for a long trip (e.g. Dallas, TX → Denver, CO)

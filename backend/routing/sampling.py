@@ -11,8 +11,8 @@ import bisect
 import math
 from dataclasses import dataclass
 
-METERS_PER_MILE = 1609.344
-EARTH_RADIUS_M = 6_371_008.8
+from .geometry import METERS_PER_MILE
+
 ALLOWED_INTERVALS_MI = (10, 25, 50)
 
 
@@ -41,22 +41,6 @@ class Checkpoint:
     lon: float
     elapsed_s: float  # travel time from departure
     represents_mi: float
-
-
-def haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
-    lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
-    h = (
-        math.sin((lat2 - lat1) / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
-    )
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(h))
-
-
-def cumulative_distances(coords: list[tuple[float, float]]) -> list[float]:
-    out = [0.0]
-    for a, b in zip(coords, coords[1:], strict=False):
-        out.append(out[-1] + haversine_m(a, b))
-    return out
 
 
 def _interpolate(geometry: RouteGeometry, distance_m: float) -> tuple[float, float, float]:

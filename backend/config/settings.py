@@ -97,3 +97,6 @@ REST_FRAMEWORK = {
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
 OPEN_METEO_URL = os.getenv("OPEN_METEO_URL", "https://api.open-meteo.com/v1/forecast")
 PROVIDER_TIMEOUT_S = float(os.getenv("PROVIDER_TIMEOUT_S", "15"))
+
+# Wind value checked against the brief's thresholds: "gust" (default, conservative) or "sustained"
+WIND_METRIC = os.getenv("WIND_METRIC", "gust")
