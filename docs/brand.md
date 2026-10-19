@@ -30,6 +30,3 @@ Screenshots are kept locally in `docs/inspo/` and are not committed, since they 
 - **TMS:** status pills with a count (`OPERATING (184)`) → risk pills on route cards (`SEVERE 12 mi`). Colored day tiles in a weekly row → our per-route risk strip.
 - **Sentinel:** dark glass cards with soft radial teal glows; comparison table with the "winner" row highlighted → our route comparison with the recommended route highlighted.
 - Headlines highlight one key word in turquoise ("Trucking **Automation**").
-
-## Stack signals (job post + site)
-React SPA (hashed `/static/js` bundles), React + **MUI** and Django + **DRF** per the job post, plus PostgreSQL, Redis, GCP and Docker/Kubernetes mentioned in postings.

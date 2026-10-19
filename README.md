@@ -5,7 +5,7 @@ Picks the safest truck route by checking the forecast **at each checkpoint for t
 **Live app:** https://weather-truck-routing-1081490071089.us-central1.run.app
 **Walkthrough (Loom):** _link coming_
 
-![Three Dallas → Denver truck routes on a dark map, with risk-coloured checkpoints, the weather heatmap and the 0–48 h slider](docs/screenshot.jpg)
+![Three Virginia Beach → Atlantic City truck routes through a coastal wind storm, with route labels, risk-coloured checkpoints, the truck position, the forecast heatmap and the risk-over-time chart](docs/screenshot.jpg)
 
 ## What it does
 
@@ -47,7 +47,7 @@ Values within a small tolerance count as ties, so rounding noise never decides a
 | What counts as "Severe miles"? | Each checkpoint covers the road **halfway to its neighbours**, so a route's miles always add up to its length. |
 | Rain rate | Open-Meteo `rain` **+ `showers`**. Showers are reported separately, and leaving them out would miss thunderstorm downpours. |
 | Which forecast hour? | Departure + the routing API's travel time to that point, rounded to the **nearest hour**. |
-| Dots and shading disagree? | They answer different questions. A dot is the forecast **when the truck reaches it**; the shading is the whole corridor **at the slider's hour**. Next to the truck marker (the ringed dots) they line up. The shading is also coarser (cells of 0.25–1°, smoothed) to fit 49 hours in one request. |
+| Dots and shading disagree? | They answer different questions. A dot is the forecast **when the truck reaches it**; the shading is the whole corridor **at the slider's hour**. Both use the same colour per level. Next to the truck marker (the ringed dots) they line up. The shading is also coarser (cells of 0.25–1°, smoothed) to fit 49 hours in one request. |
 | Heatmap "0–48 h" | Hours from **now**, not from departure: it's a forecast for the corridor, and the hours after arrival still show whether leaving later would be safer. The trip window is highlighted and the status line says when the truck hasn't left yet or has already arrived. Low risk is left **unshaded**, so any tint means Moderate or worse. |
 | Departure window | Now to now + 48 h, so every ETA stays inside a reliable forecast. |
 
@@ -96,8 +96,8 @@ Speed and quota choices:
 | Plan a trip, fresh (Dallas → Denver, 3 routes) | **3.3 s** |
 | Plan the same trip, cached | 0.39 s |
 | Heatmap, all 49 hours | 1.5 s · 14 KB |
-| Slider playback (Intel UHD 620, production build) | **60 fps**, slowest frame 16.8 ms |
-| Initial JavaScript | 153 KB brotli; map code lazy-loaded |
+| Slider playback (Intel UHD 620, production build) | **60 fps**, 95% of frames under 16.8 ms |
+| Initial JavaScript | 149 KB brotli; map code lazy-loaded |
 
 The slider never touches the network. Each forecast hour is painted once into a cached GPU texture, and scrubbing only cross-fades between two of them.
 
