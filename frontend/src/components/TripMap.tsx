@@ -1,5 +1,5 @@
 import type { PickingInfo } from '@deck.gl/core'
-import { PathLayer, ScatterplotLayer } from '@deck.gl/layers'
+import { BitmapLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { Box, Paper, Stack, Typography } from '@mui/material'
 import {
@@ -14,11 +14,12 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { Checkpoint, Route, Trip } from '../api/types.ts'
+import type { Checkpoint, Heatmap, Route, Trip } from '../api/types.ts'
 import { describeCause } from '../lib/explain.ts'
+import { buildFrames, truckPosition } from '../lib/heatmap.ts'
 import { RISK_LABEL, ROUTE_NAMES, formatTime } from '../lib/format.ts'
 import { riskColors, routeColors, tokens } from '../theme.ts'
-import { RiskLegend } from './RiskLegend.tsx'
+import { HeatmapControls } from './HeatmapControls.tsx'
 
 setWorkerUrl(workerUrl)
 
@@ -40,13 +41,27 @@ interface CheckpointDatum {
 
 interface Props {
   trip?: Trip
+  heatmap?: Heatmap
+  heatmapLoading: boolean
+  heatmapError: boolean
   selectedId: number | null
   hoveredId: number | null
   onSelect: (id: number) => void
   onHover: (id: number | null) => void
 }
 
-export default function TripMap({ trip, selectedId, hoveredId, onSelect, onHover }: Props) {
+const hoursBetween = (from: number, iso: string) => (Date.parse(iso) / 1000 - from) / 3600
+
+export default function TripMap({
+  trip,
+  heatmap,
+  heatmapLoading,
+  heatmapError,
+  selectedId,
+  hoveredId,
+  onSelect,
+  onHover,
+}: Props) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<MapLibre | null>(null)
   const overlay = useRef<MapboxOverlay | null>(null)
@@ -90,8 +105,29 @@ export default function TripMap({ trip, selectedId, hoveredId, onSelect, onHover
   }, [trip])
 
   const focusId = hoveredId ?? selectedId ?? trip?.recommendation.route_id ?? null
+  const focusRoute = trip?.routes.find((r) => r.id === focusId)
 
-  const layers = useMemo(() => {
+  // Heatmap: frames are painted once per payload; the slider only picks which to show.
+  const frames = useMemo(() => (heatmap ? buildFrames(heatmap) : null), [heatmap])
+  const [hour, setHour] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [heatVisible, setHeatVisible] = useState(true)
+  const start = frames?.start ?? null
+  const departHour =
+    start !== null && focusRoute ? clampHour(hoursBetween(start, focusRoute.departure)) : null
+  const arriveHour =
+    start !== null && focusRoute ? hoursBetween(start, focusRoute.arrival) : null
+
+  // New heatmap → jump the slider to the departure hour (React's "adjust state on prop change").
+  const [shownFrames, setShownFrames] = useState(frames)
+  if (frames !== shownFrames) {
+    setShownFrames(frames)
+    setPlaying(false)
+    if (departHour !== null) setHour(departHour)
+  }
+
+  // Route and checkpoint layers change with the trip or focus, never with the slider.
+  const routeLayers = useMemo(() => {
     if (!trip) return []
     // Focused route last, so it draws on top.
     const routes = [...trip.routes].sort((a, b) => Number(a.id === focusId) - Number(b.id === focusId))
@@ -173,9 +209,44 @@ export default function TripMap({ trip, selectedId, hoveredId, onSelect, onHover
     ]
   }, [trip, focusId, onSelect, onHover])
 
+  // Per-frame layers: two forecast hours cross-faded, plus the truck at that moment.
   useEffect(() => {
-    overlay.current?.setProps({ layers })
-  }, [layers])
+    // One layer per forecast hour keeps each image on the GPU after its first upload;
+    // scrubbing only toggles visibility and opacity, so frames stay cheap.
+    const lower = Math.floor(hour)
+    const upper = frames ? Math.min(lower + 1, frames.frames.length - 1) : lower
+    const frameLayers = (frames?.frames ?? []).map(
+      (image, i) =>
+        new BitmapLayer({
+          id: `heat-${i}`,
+          image,
+          bounds: frames!.bounds,
+          visible: heatVisible && (i === lower || i === upper),
+          opacity: i === upper && upper !== lower ? hour - lower : 1,
+        }),
+    )
+    const truck =
+      frames && focusRoute ? truckPosition(focusRoute, frames.start + hour * 3600) : null
+    overlay.current?.setProps({
+      layers: [
+        ...frameLayers,
+        ...routeLayers,
+        new ScatterplotLayer<[number, number]>({
+          id: 'truck',
+          data: truck ? [truck] : [],
+          getPosition: (d) => d,
+          getFillColor: [255, 255, 255, 255],
+          getRadius: 7,
+          radiusUnits: 'pixels',
+          stroked: true,
+          getLineColor: rgba(routeColors[(focusRoute?.id ?? 0) % routeColors.length]),
+          getLineWidth: 4,
+          lineWidthUnits: 'pixels',
+          updateTriggers: { getPosition: hour, getLineColor: focusRoute?.id },
+        }),
+      ],
+    })
+  }, [routeLayers, frames, heatVisible, hour, focusRoute])
 
   return (
     <Box sx={{ position: 'absolute', inset: 0 }} onMouseLeave={() => setTooltip(null)}>
@@ -183,20 +254,19 @@ export default function TripMap({ trip, selectedId, hoveredId, onSelect, onHover
       <Box ref={container} sx={{ width: '100%', height: '100%' }} />
 
       {trip && (
-        <Paper
-          elevation={0}
-          sx={{
-            position: 'absolute',
-            left: 16,
-            bottom: 16,
-            px: 1.5,
-            py: 1,
-            bgcolor: 'rgba(13, 30, 45, 0.88)',
-            backdropFilter: 'blur(6px)',
-          }}
-        >
-          <RiskLegend dense />
-        </Paper>
+        <HeatmapControls
+          start={start}
+          hour={hour}
+          onHour={setHour}
+          playing={playing}
+          onPlaying={setPlaying}
+          visible={heatVisible}
+          onVisible={setHeatVisible}
+          departHour={departHour}
+          arriveHour={arriveHour}
+          loading={heatmapLoading}
+          error={heatmapError}
+        />
       )}
 
       {tooltip && trip && <CheckpointTooltip {...tooltip} trip={trip} />}
@@ -205,6 +275,10 @@ export default function TripMap({ trip, selectedId, hoveredId, onSelect, onHover
 }
 
 const TOOLTIP_WIDTH = 260
+
+function clampHour(hour: number) {
+  return Math.min(Math.max(hour, 0), 48)
+}
 
 interface TooltipProps {
   x: number

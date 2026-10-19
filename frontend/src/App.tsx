@@ -2,7 +2,7 @@ import { Box, Stack, Typography } from '@mui/material'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Suspense, lazy, useState } from 'react'
 
-import { type ApiError, planTrip } from './api/client.ts'
+import { type ApiError, fetchHeatmap, planTrip } from './api/client.ts'
 import type { TripRequest } from './api/types.ts'
 import { Results } from './components/Results.tsx'
 import { TripForm } from './components/TripForm.tsx'
@@ -25,6 +25,15 @@ export default function App() {
     retry: false,
   })
   const error = trip.error as ApiError | null
+
+  // Same corridor for every checkpoint interval, so the interval isn't part of the key.
+  const routes = trip.data?.routes
+  const heatmap = useQuery({
+    queryKey: ['heatmap', request?.origin, request?.destination, request?.depart_at, request?.weight_lb, routes?.length],
+    queryFn: () => fetchHeatmap(routes!.map((r) => r.path), request!.weight_lb),
+    enabled: Boolean(routes && request),
+    retry: false,
+  })
 
   return (
     <Box
@@ -95,6 +104,9 @@ export default function App() {
         <Suspense fallback={null}>
           <TripMap
             trip={trip.data}
+            heatmap={heatmap.data}
+            heatmapLoading={heatmap.isFetching}
+            heatmapError={heatmap.isError}
             selectedId={selectedId}
             hoveredId={hoveredId}
             onSelect={setSelectedId}
