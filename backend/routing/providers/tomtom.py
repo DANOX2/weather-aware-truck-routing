@@ -4,6 +4,8 @@ Speed and quota (free tier ≈ 2,500 requests/day):
 - TomTom's own `maxAlternatives` adds ~5.5 s on long trips (7.4 s vs 1.8 s measured),
   so we instead fire the main route and detour routes through offset via-points
   in parallel: 3 requests and ~2 s; a second wave of 2 only when needed;
+- only trips still short of 3 routes (short ones, where it is cheap) then ask for
+  TomTom's own alternatives, and the duplicate/outlier limits are relaxed;
 - routes and searches are cached, so re-sampling at another interval is free.
 """
 
@@ -30,6 +32,10 @@ KG_PER_LB = 0.45359237
 ROUTES_WANTED = 3
 MAX_TIME_RATIO = 1.5  # drop alternatives slower than 1.5× the fastest
 MAX_OVERLAP = 0.7  # routes sharing more than this share of 0.1° cells are duplicates
+# Top-up limits when the strict ones leave fewer than 3 (short trips, few roads): up to 2× the
+# fastest, and still different on at least 10% of the road. Anything closer is a copy.
+RELAXED_TIME_RATIO = 2.0
+RELAXED_OVERLAP = 0.9
 # Via-point offsets from the midpoint, as a share of crow-fly length: one wave per tuple.
 DETOUR_WAVES = ((0.15,), (0.30,))
 OVERLAP_CELL_DEG = 0.1
@@ -175,23 +181,33 @@ def _overlap(a: set, b: set) -> float:
     return len(a & b) / len(a | b) if a or b else 1.0
 
 
-def select_routes(candidates: list[Route], wanted: int = ROUTES_WANTED) -> list[Route]:
-    """Keep provider order; drop slow outliers and near-duplicates."""
+def select_routes(
+    candidates: list[Route], wanted: int = ROUTES_WANTED, relaxed: bool = False
+) -> list[Route]:
+    """Keep provider order; drop slow outliers and near-duplicates.
+
+    `relaxed` tops up a short list with routes under the looser limits, after every route
+    that passes the strict ones.
+    """
     if not candidates:
         return []
     fastest = min(r.duration_s for r in candidates)
+    limits = [(MAX_TIME_RATIO, MAX_OVERLAP)]
+    if relaxed:
+        limits.append((RELAXED_TIME_RATIO, RELAXED_OVERLAP))
     chosen: list[Route] = []
     chosen_cells: list[set] = []
-    for route in candidates:
-        if route.duration_s > fastest * MAX_TIME_RATIO:
-            continue
-        cells = _cells(route)
-        if any(_overlap(cells, other) > MAX_OVERLAP for other in chosen_cells):
-            continue
-        chosen.append(route)
-        chosen_cells.append(cells)
-        if len(chosen) == wanted:
-            break
+    for max_ratio, max_overlap in limits:
+        for route in candidates:
+            if len(chosen) == wanted:
+                return chosen
+            if any(route is c for c in chosen) or route.duration_s > fastest * max_ratio:
+                continue
+            cells = _cells(route)
+            if any(_overlap(cells, other) > max_overlap for other in chosen_cells):
+                continue
+            chosen.append(route)
+            chosen_cells.append(cells)
     return chosen
 
 
@@ -250,6 +266,8 @@ def get_routes(
 ) -> list[Route]:
     """Up to 3 distinct truck routes: TomTom's best route first, then the fastest detours.
 
+    Fewer than 3 only when the road network has no other route within 2× the fastest time.
+
     `depart_at=None` means "now". Cached for 10 minutes per (points, 15-min slot, 1,000-lb bucket).
     """
     slot = depart_at.replace(minute=depart_at.minute // 15 * 15, second=0) if depart_at else None
@@ -286,6 +304,21 @@ def get_routes(
             routes = select_routes(main + sorted(detours, key=lambda r: r.duration_s))
             if len(routes) == ROUTES_WANTED:
                 break
+
+        if main and len(routes) < ROUTES_WANTED:
+            # Short trips: TomTom's own alternatives are cheap here, then relax the limits.
+            try:
+                result = _get(
+                    client,
+                    ROUTING_URL.format(locations=_locations(origin, destination)),
+                    [*base, ("maxAlternatives", str(ROUTES_WANTED - 1))],
+                )
+                alternatives = [_parse_route(r) for r in result.get("routes", [])[1:]]
+            except RoutingProviderError:
+                alternatives = []
+            routes = select_routes(
+                main + alternatives + sorted(detours, key=lambda r: r.duration_s), relaxed=True
+            )
 
     if not routes:
         raise RoutingProviderError("No truck route between these points", code="no_route")

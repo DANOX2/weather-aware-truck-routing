@@ -97,12 +97,18 @@ def _points(request) -> list[tuple[float, float]]:
     return [tuple(map(float, p.split(","))) for p in locations.split(":")]
 
 
-def corridor_by_via(fail_vias=(), hours=11.0):
-    """Main route on the straight corridor; each detour follows its via-point's longitude."""
+def corridor_by_via(fail_vias=(), hours=11.0, alternatives=()):
+    """Main route on the straight corridor; each detour follows its via-point's longitude.
+
+    `alternatives`: (lon_offset, hours) of the routes TomTom adds when asked for alternatives.
+    """
     failing = {(round(lat, 5), round(lon, 5)) for lat, lon in fail_vias}
 
     def handler(request):
         points = _points(request)
+        if "maxAlternatives" in request.url.params:
+            extra = [raw_route(offset, hours=h) for offset, h in alternatives]
+            return httpx.Response(200, json={"routes": [raw_route(0, hours=10), *extra]})
         if len(points) == 2:
             return httpx.Response(200, json={"routes": [raw_route(0, hours=10)]})
         if points[1] in failing:
@@ -136,10 +142,31 @@ def test_second_wave_only_when_first_falls_short():
 
 @respx.mock
 def test_slow_detours_are_dropped():
-    ROUTING.mock(side_effect=corridor_by_via(hours=16))  # > 1.5× the 10 h main route
+    ROUTING.mock(side_effect=corridor_by_via(hours=21))  # > 2× the 10 h main route
     routes = get_routes(DALLAS, DENVER, None, 40_000)
     assert [r.via_detour for r in routes] == [False]
-    assert ROUTING.call_count == 5
+    assert ROUTING.call_count == 6  # 2 detour waves + one alternatives request
+
+
+@respx.mock
+def test_short_list_asks_tomtom_for_alternatives_then_relaxes():
+    # Detours at 16 h (1.6×) miss the strict 1.5× limit; TomTom offers one more corridor.
+    ROUTING.mock(side_effect=corridor_by_via(hours=16, alternatives=[(0.5, 12)]))
+    routes = get_routes(DALLAS, DENVER, None, 40_000)
+    assert [r.duration_s / 3600 for r in routes] == [10, 12, 16]
+    assert [r.via_detour for r in routes] == [False, False, True]
+    assert ROUTING.calls[-1].request.url.params["maxAlternatives"] == "2"
+
+
+def test_relaxed_selection_prefers_strict_routes_and_still_drops_copies():
+    routes = [
+        fake_route(0.0, 10),
+        fake_route(1.0, 17),  # only passes the relaxed 2× limit
+        fake_route(0.002, 10.1),  # same cells as the main route → copy, even when relaxed
+        fake_route(-1.0, 12),
+    ]
+    assert [r.duration_s / 3600 for r in select_routes(routes)] == [10, 12]
+    assert [r.duration_s / 3600 for r in select_routes(routes, relaxed=True)] == [10, 12, 17]
 
 
 @respx.mock
