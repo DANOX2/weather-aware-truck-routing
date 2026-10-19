@@ -165,7 +165,7 @@ Heatmap performance plan:
 | **P3b UI: map** ✅ | R8 criteria: route ↔ card highlighting, checkpoint tooltips explaining the cause, legend, camera | 2.0 h | Day 2–3 |
 | **P3c UI: heatmap** ✅ | R9 criteria: corridor raster, 60 fps slider, play, departure/arrival markers | 2.0 h | Day 3 |
 | **P3d UX polish** ✅ | Go through §2.2–2.3 item by item: every state, keyboard, responsive, contrast, shareable URL, small transitions | **1.5 h** | Day 3 |
-| **P4 Ship** | Dockerfile, deploy, production settings, measure §2.4 targets and fix whatever misses | 1.5 h | Day 3 |
+| **P4 Ship** ✅ | Dockerfile, deploy, production settings, measure §2.4 targets and fix whatever misses | 1.5 h | Day 3 |
 | **P5 Docs + Loom** | README (setup, our rules for the ambiguities, architecture, measured numbers, trade-offs), 5–10 min Loom | 1.5 h | Day 3–4 |
 | Buffer | | 0.5 h | Day 4 |
 | **Total** | | **16 h** | |
@@ -222,6 +222,11 @@ Out of scope on purpose: user accounts, saved trips, building our own routing en
   - **Error states:** a provider outage shows a plain message with Retry, which recovers. Server validation messages land on the matching field.
   - **Phone (390×844):** the map takes 62% of the height and the heatmap panel is compact.
   - **Cut on purpose:** shareable URL and mobile bottom sheet (see the cut list).
+- **2026-10-19**: **Deployed to Cloud Run**: https://weather-truck-routing-1081490071089.us-central1.run.app (us-central1, max 2 instances, secrets from Secret Manager).
+  - **Live, Dallas → Denver:** trip 3.3 s (TomTom), cached 0.39 s; heatmap 1.5 s; first page load with cold start 2.8 s.
+  - **Browser run on the hosted app:** 60 fps playback, no console errors.
+  - **Transfer size:** main JS is 153 KB with brotli (578 KB raw).
+  - **Railway:** project ready but not deployed, because GCP had no blockers.
 
 ## 9. Definition of done
 - [ ] Every item of the §2 quality bar checked on the hosted URL (criteria, UI, UX states, performance numbers)
