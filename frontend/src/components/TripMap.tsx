@@ -17,7 +17,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { Checkpoint, Heatmap, Route, Trip } from '../api/types.ts'
+import { RISK_LEVELS, type Checkpoint, type Heatmap, type Route, type Trip } from '../api/types.ts'
 import { describeCause } from '../lib/explain.ts'
 import { buildFrames, truckStatus } from '../lib/heatmap.ts'
 import { RISK_LABEL, ROUTE_NAMES, formatDuration, formatMiles, formatTime } from '../lib/format.ts'
@@ -148,6 +148,27 @@ export default function TripMap({
     start !== null && focusRoute ? clampHour(hoursBetween(start, focusRoute.departure)) : null
   const arriveHour =
     start !== null && focusRoute ? hoursBetween(start, focusRoute.arrival) : null
+
+  // The focused truck's own risk per forecast hour, for the timeline's trip line: the worst
+  // checkpoint it reaches in that hour, or the nearest one when none falls inside it.
+  const truckLevels = useMemo(() => {
+    if (!frames || !focusRoute) return null
+    const levels = frames.timeline.map((_, h) => {
+      const truck = truckStatus(focusRoute, frames.start + h * 3600)
+      return truck.phase === 'en-route' && truck.checkpoint.level
+        ? RISK_LEVELS.indexOf(truck.checkpoint.level)
+        : null
+    })
+    const reached = new Set<number>()
+    for (const cp of focusRoute.checkpoints) {
+      const h = Math.round((Date.parse(cp.eta) / 1000 - frames.start) / 3600)
+      if (h < 0 || h >= levels.length || !cp.level) continue
+      const level = RISK_LEVELS.indexOf(cp.level)
+      levels[h] = reached.has(h) ? Math.max(levels[h] ?? 0, level) : level
+      reached.add(h)
+    }
+    return levels
+  }, [frames, focusRoute])
 
   // New heatmap → jump the slider to the departure hour (React's "adjust state on prop change").
   const [shownFrames, setShownFrames] = useState(frames)
@@ -396,6 +417,7 @@ export default function TripMap({
           radar={{ scan, error: radarScan.isError }}
           departHour={departHour}
           arriveHour={arriveHour}
+          truckLevels={truckLevels}
           loading={heatmapLoading}
           error={heatmapError}
         />

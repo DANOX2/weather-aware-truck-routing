@@ -17,19 +17,23 @@ interface Props {
   maxHour: number
   departHour: number | null
   arriveHour: number | null
+  truckLevels: (number | null)[] | null // the truck's own risk level (0–4) at each hour
   onHour: (hour: number) => void
 }
 
 /**
  * One bar per forecast hour, drawn on the slider's scale so it lines up with the thumb:
- * height = share of the corridor at Moderate or worse, colour = the worst level anywhere.
- * The trip window is highlighted and hours outside it are dimmed.
+ * height = share of the corridor at Moderate or worse, split by level (Moderate at the bottom,
+ * the worst on top), so a small Severe patch is a sliver rather than a red bar. Under the bars,
+ * the trip line takes the colours of the truck's own checkpoints, matching the dots and cards.
+ * Hours outside the trip are dimmed.
  */
 export const RiskTimeline = memo(function RiskTimeline({
   timeline,
   maxHour,
   departHour,
   arriveHour,
+  truckLevels,
   onHour,
 }: Props) {
   const tripStart = departHour ?? 0
@@ -61,29 +65,64 @@ export const RiskTimeline = memo(function RiskTimeline({
               fill={tokens.turquoise}
               opacity={0.1}
             />
-            <rect
-              x={tripStart}
-              y={0.97}
-              width={tripEnd - tripStart}
-              height={0.06}
-              fill={tokens.turquoise}
-            />
+            {truckLevels?.map((level, h) => {
+              const from = Math.max(h - 0.5, tripStart)
+              const to = Math.min(h + 0.5, tripEnd)
+              if (level === null || to <= from) return null
+              return (
+                <rect
+                  key={h}
+                  x={from}
+                  y={0.97}
+                  width={to - from}
+                  height={0.14}
+                  fill={LEVEL_COLORS[level]}
+                />
+              )
+            })}
           </>
         )}
-        {timeline.slice(0, maxHour + 1).map(({ atRisk, worst }, h) => {
+        {timeline.slice(0, maxHour + 1).map(({ atRisk, shares }, h) => {
           const inTrip = !hasTrip || (h >= Math.floor(tripStart) && h <= Math.ceil(tripEnd))
-          // A sliver for "all Low", a visible minimum for any risk, then sqrt so small shares show.
-          const height = worst < 1 ? 0.06 : Math.max(0.18, Math.sqrt(atRisk)) * 0.92
+          const x = Math.max(h - 0.38, 0)
+          const width = h === 0 || h === maxHour ? 0.38 : 0.76
+          const opacity = inTrip ? 1 : 0.4
+          if (atRisk === 0) {
+            // A sliver for "all Low".
+            return (
+              <rect
+                key={h}
+                x={x}
+                y={0.88}
+                width={width}
+                height={0.06}
+                fill={tokens.textMuted}
+                opacity={0.35 * opacity}
+              />
+            )
+          }
+          // A visible minimum for any risk, then sqrt so small shares show; every level present
+          // gets at least a sliver.
+          const height = Math.max(0.18, Math.sqrt(atRisk)) * 0.92
+          let y = 0.94
           return (
-            <rect
-              key={h}
-              x={Math.max(h - 0.38, 0)}
-              y={0.94 - height}
-              width={h === 0 || h === maxHour ? 0.38 : 0.76}
-              height={height}
-              fill={worst < 1 ? tokens.textMuted : LEVEL_COLORS[Math.min(Math.floor(worst), 4)]}
-              opacity={(worst < 1 ? 0.35 : 1) * (inTrip ? 1 : 0.4)}
-            />
+            <g key={h} opacity={opacity}>
+              {shares.map((share, i) => {
+                if (share === 0) return null
+                const part = Math.max((share / atRisk) * height, 0.05)
+                y -= part
+                return (
+                  <rect
+                    key={i}
+                    x={x}
+                    y={y}
+                    width={width}
+                    height={part}
+                    fill={LEVEL_COLORS[i + 1]}
+                  />
+                )
+              })}
+            </g>
           )
         })}
       </svg>

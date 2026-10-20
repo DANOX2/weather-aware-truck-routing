@@ -36,7 +36,7 @@ export interface HeatmapFrames {
 
 export interface HourSummary {
   atRisk: number // share of corridor cells at Moderate or worse, 0–1
-  worst: number // highest risk index anywhere in the corridor that hour
+  shares: number[] // share of corridor cells at Moderate, High, Severe and No travel
 }
 
 /** Decode the packed API payload and paint one smoothed image per hour. */
@@ -57,18 +57,21 @@ export function buildFrames(heatmap: Heatmap): HeatmapFrames {
   for (let h = 0; h < hours; h++) {
     const image = smallCtx.createImageData(width, height)
     let atRisk = 0
-    let worst = 0
+    const counts = [0, 0, 0, 0]
     cells.forEach((cell, k) => {
       const row = Math.floor(cell / grid.nx)
       const col = cell % grid.nx + 1
       const y = grid.ny - row // cells count from the south; images from the top (+1 padding)
       const index = bytes[h * cells.length + k] / scale
-      if (index >= 1) atRisk++
-      worst = Math.max(worst, index)
+      if (index >= 1) {
+        atRisk++
+        counts[Math.min(Math.floor(index), 4) - 1]++
+      }
       const [r, g, b, a] = colorForIndex(index)
       image.data.set([r, g, b, a], (y * width + col) * 4)
     })
-    timeline.push({ atRisk: cells.length ? atRisk / cells.length : 0, worst })
+    const total = cells.length || 1
+    timeline.push({ atRisk: atRisk / total, shares: counts.map((n) => n / total) })
     smallCtx.putImageData(image, 0, 0)
 
     const frame = document.createElement('canvas')

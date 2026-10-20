@@ -63,6 +63,7 @@ interface Props {
   radar: { scan: string | null; error: boolean }
   departHour: number | null
   arriveHour: number | null
+  truckLevels: (number | null)[] | null
   loading: boolean
   error: boolean
 }
@@ -80,6 +81,7 @@ export function HeatmapControls({
   radar,
   departHour,
   arriveHour,
+  truckLevels,
   loading,
   error,
 }: Props) {
@@ -254,6 +256,7 @@ export function HeatmapControls({
                 maxHour={MAX_HOUR}
                 departHour={departHour}
                 arriveHour={arriveHour}
+                truckLevels={truckLevels}
                 onHour={(h) => {
                   onPlaying(false)
                   onHour(h)
@@ -305,7 +308,8 @@ export function HeatmapControls({
             <RiskLegend dense />
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               Dots: weather when the truck gets there (ringed = around this hour) · Shading:
-              weather at this hour, none = low · Bars: share of the corridor at risk
+              weather at this hour, none = low · Bars: corridor at risk, by level · Trip line: your
+              truck
             </Typography>
           </Stack>
         </>
