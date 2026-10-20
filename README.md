@@ -132,7 +132,7 @@ npm run dev
 ## Tests and quality
 
 ```bash
-cd backend  && uv run pytest && uv run ruff check .     # 120 tests, providers mocked
+cd backend  && uv run pytest && uv run ruff check .     # 121 tests, providers mocked
 cd frontend && npm run lint && npm run build             # oxlint + type check
 ```
 

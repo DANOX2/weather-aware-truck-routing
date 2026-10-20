@@ -84,3 +84,11 @@ def test_rate_limit_has_its_own_code():
     with pytest.raises(WeatherProviderError) as exc:
         get_forecasts([(30.0, -90.0)])
     assert exc.value.code == "weather_rate_limited"
+
+
+@respx.mock
+def test_rate_limit_says_which_limit():
+    reason = "Hourly API request limit exceeded. Please try again in the next hour."
+    respx.get(URL).mock(return_value=httpx.Response(429, json={"error": True, "reason": reason}))
+    with pytest.raises(WeatherProviderError, match="Hourly API request limit"):
+        get_forecasts([(30.0, -90.0)])

@@ -6,12 +6,15 @@ three route options and the heatmap grid share cache entries and requests.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 
 import httpx
 from django.conf import settings
 from django.core.cache import cache
+
+logger = logging.getLogger(__name__)
 
 GRID_DEG = 0.1
 FORECAST_HOURS = 120  # departure ≤ 48 h out + longest US drive time, with margin
@@ -92,8 +95,16 @@ def _fetch_batch(client: httpx.Client, points: list[tuple[float, float]]) -> lis
     except httpx.HTTPError as exc:
         raise WeatherProviderError(f"Open-Meteo request failed: {type(exc).__name__}") from exc
     if response.status_code == 429:
-        # Free tier: 600 locations/min, 10k/day per IP. Usually clears within a minute.
-        raise WeatherProviderError("Open-Meteo rate limit reached", code="weather_rate_limited")
+        # Free tier per IP: 600 locations/min, 5k/hour, 10k/day. The body says which one.
+        try:
+            reason = response.json().get("reason", "")
+        except ValueError:
+            reason = ""
+        logger.warning("Open-Meteo 429 for %d locations: %s", len(points), reason or "no reason")
+        raise WeatherProviderError(
+            f"Open-Meteo rate limit reached{f': {reason}' if reason else ''}",
+            code="weather_rate_limited",
+        )
     if response.status_code >= 400:
         raise WeatherProviderError(f"Open-Meteo returned HTTP {response.status_code}")
     data = response.json()
