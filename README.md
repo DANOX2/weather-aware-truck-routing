@@ -85,7 +85,7 @@ Provider failures come back as stable codes (`no_route`, `rate_limited`, `weathe
 | Basemap | CARTO Dark Matter | No key; matches the dark UI |
 
 Speed and quota choices:
-- TomTom's own `maxAlternatives` added ~5.5 s on long trips (measured 7.4 s vs 1.8 s). So the main route and two detours through offset waypoints are fetched **in parallel**. Each detour only has to cross a circle around its waypoint (radius scaled to the trip), not hit the exact point, so it never drives out to a dead end and back, filtered for duplicates and for slow outliers. Only trips still short of 3 routes (short trips, where it's cheap) then ask TomTom for its alternatives, with looser limits: up to 2× the fastest and at least 10% different road.
+- TomTom's own `maxAlternatives` added ~5.5 s on long trips (measured 7.4 s vs 1.8 s). So the main route and two detours through offset waypoints are fetched **in parallel**. A waypoint off the road network can make a detour drive out to it and back along a dead end; those detours are re-requested through a circle around the waypoint (radius scaled to the trip) that the route only has to cross. Exact points go first, because TomTom rejects one at sea in 0.4 s but takes ~20 s to reject a circle there, filtered for duplicates and for slow outliers. Only trips still short of 3 routes (short trips, where it's cheap) then ask TomTom for its alternatives, with looser limits: up to 2× the fastest and at least 10% different road.
 - Open-Meteo counts every location as a call (10k/day, 600/min). Coordinates are snapped to a 0.1° grid and shared between routes. The heatmap only fetches a **corridor** of at most 300 cells.
 - Everything is cached: routes for 10 min, forecasts for 30 min, searches for 1 day. Redis is used when `REDIS_URL` is set, in-process memory otherwise.
 
@@ -132,7 +132,7 @@ npm run dev
 ## Tests and quality
 
 ```bash
-cd backend  && uv run pytest && uv run ruff check .     # 119 tests, providers mocked
+cd backend  && uv run pytest && uv run ruff check .     # 120 tests, providers mocked
 cd frontend && npm run lint && npm run build             # oxlint + type check
 ```
 

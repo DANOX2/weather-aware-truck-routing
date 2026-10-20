@@ -7,6 +7,7 @@ from django.core.cache import cache
 
 from routing.providers import tomtom
 from routing.providers.tomtom import (
+    SPUR_KM,
     Route,
     RoutingProviderError,
     _parse_route,
@@ -14,6 +15,7 @@ from routing.providers.tomtom import (
     get_routes,
     search_places,
     select_routes,
+    spur_km,
     via_radius_m,
 )
 from routing.sampling import RouteGeometry
@@ -28,11 +30,18 @@ def setup(settings):
     cache.clear()
 
 
-def raw_route(lon_offset=0.0, hours=10.0, n=50, progress=True):
-    """Straight north-south line from Dallas latitude, shifted east by `lon_offset` degrees."""
+def raw_route(lon_offset=0.0, hours=10.0, n=50, progress=True, spur=False):
+    """Straight north-south line from Dallas latitude, shifted east by `lon_offset` degrees.
+
+    `spur`: halfway up, drive 0.2° east and back along the same road, like a dead-end detour.
+    """
     pts = [
         {"latitude": DALLAS[0] + i * 0.14, "longitude": DALLAS[1] + lon_offset} for i in range(n)
     ]
+    if spur:
+        mid = pts[n // 2]
+        out = [{**mid, "longitude": mid["longitude"] + k * 0.02} for k in range(1, 11)]
+        pts[n // 2 + 1 : n // 2 + 1] = [*out, *out[-2::-1]]
     route = {
         "summary": {"lengthInMeters": 1_000_000, "travelTimeInSeconds": hours * 3600},
         "legs": [{"points": pts}],
@@ -102,12 +111,14 @@ def _points(request) -> list[tuple[float, float]]:
     ]
 
 
-def corridor_by_via(fail_vias=(), hours=11.0, alternatives=()):
+def corridor_by_via(fail_vias=(), hours=11.0, alternatives=(), spur_vias=()):
     """Main route on the straight corridor; each detour follows its via-point's longitude.
 
     `alternatives`: (lon_offset, hours) of the routes TomTom adds when asked for alternatives.
+    `spur_vias`: exact via-points that come back with a dead-end spur (circles don't).
     """
     failing = {(round(lat, 5), round(lon, 5)) for lat, lon in fail_vias}
+    spurring = {(round(lat, 5), round(lon, 5)) for lat, lon in spur_vias}
 
     def handler(request):
         points = _points(request)
@@ -119,20 +130,31 @@ def corridor_by_via(fail_vias=(), hours=11.0, alternatives=()):
         if points[1] in failing:
             return httpx.Response(500)
         via_lon_offset = points[1][1] - DALLAS[1]
-        return httpx.Response(200, json={"routes": [raw_route(via_lon_offset, hours=hours)]})
+        spur = points[1] in spurring and "circle(" not in request.url.path
+        route = raw_route(via_lon_offset, hours=hours, spur=spur)
+        return httpx.Response(200, json={"routes": [route]})
 
     return handler
 
 
+def test_spur_is_driving_out_and_back_to_the_same_spot():
+    assert spur_km(_parse_route(raw_route()).geometry) < 1
+    assert spur_km(_parse_route(raw_route(spur=True)).geometry) > SPUR_KM
+
+
 @respx.mock
-def test_detours_cross_a_circle_instead_of_an_exact_point():
-    ROUTING.mock(side_effect=corridor_by_via())
-    get_routes(DALLAS, DENVER, None, 40_000)
-    detour_path = ROUTING.calls[1].request.url.path
-    assert detour_path.count("circle(") == 1  # only the via; origin and destination stay exact
-    radius = float(detour_path.split("circle(")[1].split(")")[0].split(",")[2])
+def test_spurred_detour_is_retried_through_a_circle():
+    east = detour_points(DALLAS, DENVER, 0.15)[0]
+    ROUTING.mock(side_effect=corridor_by_via(spur_vias=[east]))
+    routes = get_routes(DALLAS, DENVER, None, 40_000)
+
+    paths = [call.request.url.path for call in ROUTING.calls]
+    assert not any("circle(" in p for p in paths[:3])  # exact points first: fast to reject at sea
+    assert len(paths) == 4 and paths[3].count("circle(") == 1  # only the spurred one is retried
+    radius = float(paths[3].split("circle(")[1].split(")")[0].split(",")[2])
     assert radius == round(via_radius_m(DALLAS, DENVER, 0.15))
-    assert 5_000 <= radius <= 50_000
+    assert len(routes) == 3
+    assert all(spur_km(r.geometry) < SPUR_KM for r in routes)
 
 
 @respx.mock

@@ -38,10 +38,13 @@ RELAXED_TIME_RATIO = 2.0
 RELAXED_OVERLAP = 0.9
 # Via-point offsets from the midpoint, as a share of crow-fly length: one wave per tuple.
 DETOUR_WAVES = ((0.15,), (0.30,))
-# Detours pass through a circle around each via-point rather than the exact point: an exact
-# point off the road network made TomTom drive a dead-end spur out to it and back.
+# An exact via-point off the road network makes TomTom drive a dead-end spur out to it and back.
+# Those detours are retried through a circle the route only has to cross. Exact points go first
+# because a circle out at sea takes TomTom ~20 s to reject, versus 0.4 s for a point.
 VIA_RADIUS_SHARE = 0.2  # of the via-point's offset from the midpoint
 VIA_RADIUS_M = (5_000, 50_000)
+SPUR_KM = 5.0  # a shorter out-and-back is a ramp or a loop, not a detour gone wrong
+SPUR_CELL_DEG = 0.005
 OVERLAP_CELL_DEG = 0.1
 
 ROUTE_CACHE_TTL_S = 10 * 60  # traffic-aware, so keep it short
@@ -254,6 +257,17 @@ def via_radius_m(origin: LatLon, destination: LatLon, offset_share: float) -> fl
     return min(max(km * 1000 * VIA_RADIUS_SHARE, VIA_RADIUS_M[0]), VIA_RADIUS_M[1])
 
 
+def spur_km(geometry: RouteGeometry) -> float:
+    """Length of the longest dead-end spur: half the driving before the route comes back to a
+    spot it already passed. Normal routes never return to the same place, so they measure ~0."""
+    first_passed: dict[tuple[int, int], float] = {}
+    longest_m = 0.0
+    for (lat, lon), dist_m in zip(geometry.coords, geometry.cum_distance_m, strict=True):
+        cell = (round(lat / SPUR_CELL_DEG), round(lon / SPUR_CELL_DEG))
+        longest_m = max(longest_m, dist_m - first_passed.setdefault(cell, dist_m))
+    return longest_m / 2 / 1000
+
+
 def _locations(*points: LatLon | tuple[float, float, float]) -> str:
     """`lat,lon` per stop; a (lat, lon, radius_m) via becomes a circle the route only crosses."""
     return ":".join(
@@ -273,6 +287,12 @@ def _fetch_parallel(
 
     with ThreadPoolExecutor(max_workers=len(legs)) as pool:
         return list(pool.map(fetch, legs))
+
+
+def _parse_detours(result: dict | RoutingProviderError) -> list[Route]:
+    if isinstance(result, RoutingProviderError):
+        return []
+    return [_parse_route(r, via_detour=True) for r in result.get("routes", [])]
 
 
 def get_routes(
@@ -300,11 +320,11 @@ def get_routes(
     with httpx.Client(timeout=settings.PROVIDER_TIMEOUT_S) as client:
         for wave, offsets in enumerate(DETOUR_WAVES):
             vias = [
-                (*v, via_radius_m(origin, destination, share))
+                (v, via_radius_m(origin, destination, share))
                 for share in offsets
                 for v in detour_points(origin, destination, share)
             ]
-            legs = [(origin, v, destination) for v in vias]
+            legs = [(origin, v, destination) for v, _ in vias]
             if wave == 0:
                 legs.insert(0, (origin, destination))
             results = _fetch_parallel(client, base, legs)
@@ -314,9 +334,14 @@ def get_routes(
                 if isinstance(first, RoutingProviderError):
                     raise first  # the main route is required; detours are best-effort
                 main = [_parse_route(r) for r in first.get("routes", [])]
-            for result in results:
-                if not isinstance(result, RoutingProviderError):
-                    detours += [_parse_route(r, via_detour=True) for r in result.get("routes", [])]
+            parsed = [_parse_detours(r) for r in results]
+            spurs = [i for i, rs in enumerate(parsed) if rs and spur_km(rs[0].geometry) > SPUR_KM]
+            if spurs:
+                circles = [(origin, (*vias[i][0], vias[i][1]), destination) for i in spurs]
+                for i, retry in zip(spurs, _fetch_parallel(client, base, circles), strict=True):
+                    parsed[i] = _parse_detours(retry)  # a failed retry drops the spur route
+            for rs in parsed:
+                detours += rs
 
             # Faster detours first, so the most practical alternatives win the remaining slots.
             routes = select_routes(main + sorted(detours, key=lambda r: r.duration_s))
