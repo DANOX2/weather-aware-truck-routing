@@ -57,9 +57,14 @@ export function planTrip(trip: TripRequest): Promise<Trip> {
   return request<Trip>('/api/trips/', { method: 'POST', body: JSON.stringify(trip) })
 }
 
-export function fetchHeatmap(paths: Trip['routes'][number]['path'][], weightLb: number) {
+/** Corridor risk from now to 48 h, or to `until` (the latest arrival) when that's later. */
+export function fetchHeatmap(
+  paths: Trip['routes'][number]['path'][],
+  weightLb: number,
+  until: string,
+) {
   return request<Heatmap>('/api/heatmap/', {
     method: 'POST',
-    body: JSON.stringify({ paths, weight_lb: weightLb }),
+    body: JSON.stringify({ paths, weight_lb: weightLb, until }),
   })
 }

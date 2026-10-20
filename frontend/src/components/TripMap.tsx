@@ -144,8 +144,11 @@ export default function TripMap({
   const [layer, setLayer] = useState<MapLayer>('forecast')
   const heatVisible = layer === 'forecast'
   const start = frames?.start ?? null
+  const maxHour = frames ? frames.frames.length - 1 : 48
   const departHour =
-    start !== null && focusRoute ? clampHour(hoursBetween(start, focusRoute.departure)) : null
+    start !== null && focusRoute
+      ? clampHour(hoursBetween(start, focusRoute.departure), maxHour)
+      : null
   const arriveHour =
     start !== null && focusRoute ? hoursBetween(start, focusRoute.arrival) : null
 
@@ -406,6 +409,7 @@ export default function TripMap({
       {trip && (
         <HeatmapControls
           start={start}
+          maxHour={maxHour}
           timeline={frames?.timeline ?? null}
           status={statusLine}
           hour={hour}
@@ -472,8 +476,8 @@ function describeTruck(
   }
 }
 
-function clampHour(hour: number) {
-  return Math.min(Math.max(hour, 0), 48)
+function clampHour(hour: number, maxHour: number) {
+  return Math.min(Math.max(hour, 0), maxHour)
 }
 
 interface TooltipProps {

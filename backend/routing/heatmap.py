@@ -1,4 +1,4 @@
-"""Risk heatmap along the trip corridor, 0–48 h from now.
+"""Risk heatmap along the trip corridor, 0–48 h from now, extended to the latest arrival.
 
 Open-Meteo counts every location as one call (10k/day, 600/min per IP), so we
 only fetch grid cells near the routes, and pick the cell size so a trip never
@@ -28,6 +28,9 @@ from .risk import (
 )
 
 HOURS = 49  # 0..48 inclusive
+# A trip leaving 48 h out can arrive days later; extend to its arrival, up to 0..96 h (Open-Meteo
+# returns 120 h, and a 48 h departure plus a 2-day drive fits).
+MAX_HOURS = 97
 MAX_CELLS = 300
 CELL_SIZES_DEG = (0.25, 0.5, 0.75, 1.0)
 CORRIDOR_CELLS = 1  # include neighbours this many cells away from a route cell
@@ -88,7 +91,16 @@ def _densify(path: list[LatLon], step_deg: float) -> list[LatLon]:
     return out
 
 
-def build_heatmap(paths: list[list[LatLon]], weight_lb: float) -> dict:
+def hours_until(until_ts: float | None, now_hour: int) -> int:
+    """Frames needed to reach `until_ts`: at least 0..48 h, at most MAX_HOURS."""
+    if until_ts is None:
+        return HOURS
+    return min(max(math.ceil((until_ts - now_hour) / 3600) + 1, HOURS), MAX_HOURS)
+
+
+def build_heatmap(
+    paths: list[list[LatLon]], weight_lb: float, until_ts: float | None = None
+) -> dict:
     paths = [_densify(p, CELL_SIZES_DEG[0] / 2) for p in paths if p]
     size, cells = corridor_cells(paths)
     rows = [r for r, _ in cells]
@@ -102,10 +114,11 @@ def build_heatmap(paths: list[list[LatLon]], weight_lb: float) -> dict:
     gusts = settings.WIND_METRIC == "gust"
 
     now_hour = int(time.time() // 3600 * 3600)
-    values = bytearray(HOURS * len(ordered))
+    hours = hours_until(until_ts, now_hour)
+    values = bytearray(hours * len(ordered))
     for j, center in enumerate(centers):
         f = forecasts[open_meteo.snap(*center, grid_deg=size)]
-        for h in range(HOURS):
+        for h in range(hours):
             i = f.index_at(now_hour + h * 3600)
             if i is None:
                 continue
@@ -124,7 +137,7 @@ def build_heatmap(paths: list[list[LatLon]], weight_lb: float) -> dict:
         # Cell positions inside the nx × ny grid, row-major from the south-west corner.
         "cells": [(r - row0) * nx + (c - col0) for r, c in ordered],
         "start": now_hour,
-        "hours": HOURS,
+        "hours": hours,
         "index_scale": INDEX_SCALE,
         # values[h * len(cells) + k] = risk index × index_scale for cell k at start + h hours
         "values": base64.b64encode(bytes(values)).decode(),

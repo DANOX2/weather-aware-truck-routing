@@ -77,6 +77,9 @@ def heatmap(request):
         return Response(demo.heatmap())
     paths = [[(lat, lon) for lon, lat in path] for path in data["paths"]]
     try:
-        return Response(build_heatmap(paths, data["weight_lb"]))
+        until = data.get("until")
+        return Response(
+            build_heatmap(paths, data["weight_lb"], until.timestamp() if until else None)
+        )
     except WeatherProviderError as exc:
         return _provider_error(exc)

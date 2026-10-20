@@ -30,7 +30,12 @@ export default function App() {
   const routes = trip.data?.routes
   const heatmap = useQuery({
     queryKey: ['heatmap', request?.origin, request?.destination, request?.depart_at, request?.weight_lb, routes?.length],
-    queryFn: () => fetchHeatmap(routes!.map((r) => r.path), request!.weight_lb),
+    queryFn: () =>
+      fetchHeatmap(
+        routes!.map((r) => r.path),
+        request!.weight_lb,
+        routes!.map((r) => r.arrival).reduce((a, b) => (Date.parse(a) > Date.parse(b) ? a : b)),
+      ),
     enabled: Boolean(routes && request),
     retry: false,
   })

@@ -103,8 +103,8 @@ def test_geocode_returns_places(client, monkeypatch):
 def test_heatmap_converts_lonlat_paths(client, monkeypatch):
     seen = {}
 
-    def fake_build(paths, weight_lb):
-        seen["paths"] = paths
+    def fake_build(paths, weight_lb, until_ts):
+        seen["paths"], seen["until_ts"] = paths, until_ts
         return {"ok": True}
 
     monkeypatch.setattr(views, "build_heatmap", fake_build)
@@ -113,6 +113,11 @@ def test_heatmap_converts_lonlat_paths(client, monkeypatch):
     )
     assert response.status_code == 200
     assert seen["paths"] == [[(32.8, -96.8), (33.0, -97.0)]]
+    assert seen["until_ts"] is None
+
+    body = {"paths": [[[-96.8, 32.8], [-97.0, 33.0]]], "weight_lb": 30_000}
+    post(client, "/api/heatmap/", {**body, "until": "2026-10-22T05:00:00Z"})
+    assert seen["until_ts"] == 1_792_645_200  # passed on as a unix timestamp
 
 
 def test_heatmap_rejects_too_many_paths(client):

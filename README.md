@@ -14,7 +14,7 @@ Picks the safest truck route by checking the forecast **at each checkpoint for t
 3. **Each checkpoint is checked against the forecast hour when the truck gets there**, scored with the brief's wind, rain and snow table plus the load rules.
 4. **One route is recommended**, with a plain explanation of how it beat each alternative, e.g. *"vs Route B: fewer Severe miles (0 mi vs 31 mi)"*.
 5. **The map** shows every route with a summary label (time and worst risk), the checkpoints coloured by risk, and tooltips with the cause ("38 mph gusts with a 42,000 lb load"), the ETA and the forecast hour used.
-6. **A 0–48 h heatmap** along the trip corridor has a slider and a play button. Above the slider, a risk-over-time chart shows when bad weather peaks, so you don't have to scrub to find the storm: each bar is the share of the corridor at each risk level, and under the trip window a line takes the colours of the truck's own checkpoints. A truck marker and a status line follow the selected hour: *"Route A · mile 441 · Moderate: 0.30 in/hr rain"*, then *"arrived … · corridor forecast only"* once the trip is over. The checkpoints the truck passes around the selected hour get a ring, so you know which dots to compare with the shading.
+6. **A 0–48 h heatmap** along the trip corridor has a slider and a play button (0.5×–2× speed). It extends past 48 h when a trip arrives later, so the truck can always be followed to arrival. Above the slider, a risk-over-time chart shows when bad weather peaks, so you don't have to scrub to find the storm: each bar is the share of the corridor at each risk level, and under the trip window a line takes the colours of the truck's own checkpoints. A truck marker and a status line follow the selected hour: *"Route A · mile 441 · Moderate: 0.30 in/hr rain"*, then *"arrived … · corridor forecast only"* once the trip is over. The checkpoints the truck passes around the selected hour get a ring, so you know which dots to compare with the shading.
 7. **Live radar** (one switch away from the forecast): NOAA's current US radar, coloured by precipitation **type**: rain, cool rain, snow, storms, hail and tropical rain. It refreshes every 2 minutes. The forecast stays the planning layer; the radar shows what is falling right now.
 
 ## How the recommendation works
@@ -48,7 +48,7 @@ Values within a small tolerance count as ties, so rounding noise never decides a
 | Rain rate | Open-Meteo `rain` **+ `showers`**. Showers are reported separately, and leaving them out would miss thunderstorm downpours. |
 | Which forecast hour? | Departure + the routing API's travel time to that point, rounded to the **nearest hour**. |
 | Dots and shading disagree? | They answer different questions. A dot is the forecast **when the truck reaches it**; the shading is the whole corridor **at the slider's hour**. Both use the same colour per level. Next to the truck marker (the ringed dots) they line up. The shading is also coarser (cells of 0.25–1°, smoothed) to fit 49 hours in one request. |
-| Heatmap "0–48 h" | Hours from **now**, not from departure: it's a forecast for the corridor, and the hours after arrival still show whether leaving later would be safer. The trip window is highlighted and the status line says when the truck hasn't left yet or has already arrived. Low risk is left **unshaded**, so any tint means Moderate or worse. |
+| Heatmap "0–48 h" | Hours from **now**, not from departure: it's a forecast for the corridor, and the hours after arrival still show whether leaving later would be safer. A trip leaving near the 48 h limit arrives later, so the heatmap then **extends to the latest arrival** (up to 96 h; Open-Meteo forecasts 120 h). The trip window is highlighted and the status line says when the truck hasn't left yet or has already arrived. Low risk is left **unshaded**, so any tint means Moderate or worse. |
 | Departure window | Now to now + 48 h, so every ETA stays inside a reliable forecast. |
 
 ## Architecture
@@ -132,7 +132,7 @@ npm run dev
 ## Tests and quality
 
 ```bash
-cd backend  && uv run pytest && uv run ruff check .     # 117 tests, providers mocked
+cd backend  && uv run pytest && uv run ruff check .     # 118 tests, providers mocked
 cd frontend && npm run lint && npm run build             # oxlint + type check
 ```
 

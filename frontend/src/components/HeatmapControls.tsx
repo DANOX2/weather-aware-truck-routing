@@ -2,6 +2,7 @@ import PauseIcon from '@mui/icons-material/Pause'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import {
   Box,
+  Button,
   CircularProgress,
   IconButton,
   Paper,
@@ -12,7 +13,7 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { HourSummary } from '../lib/heatmap.ts'
 import { formatTime } from '../lib/format.ts'
@@ -21,28 +22,28 @@ import { monoFont, tokens } from '../theme.ts'
 import { RiskLegend } from './RiskLegend.tsx'
 import { RiskTimeline } from './RiskTimeline.tsx'
 
-const MAX_HOUR = 48
 const STEP = 0.25 // quarter-hour steps; the map cross-fades between forecast hours
-const PLAY_HOURS_PER_SECOND = 4
+const HOURS_PER_SECOND = 2 // at 1× playback
+const SPEEDS = [0.5, 1, 1.5, 2]
 
 const hourFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric' })
 const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' })
 
-/** Slider ticks on local clock hours (every 6 h, or 12 h on phones); midnight shows the day. */
-function clockTicks(start: number, stepHours: number) {
+/** Slider ticks on local clock hours (every 6–24 h by width and range); midnight shows the day. */
+function clockTicks(start: number, stepHours: number, maxHour: number) {
   const ticks = []
   const first = new Date(start * 1000)
   first.setMinutes(0, 0, 0)
   for (let d = first; ; d = new Date(d.getTime() + 3600_000)) {
     const value = (d.getTime() / 1000 - start) / 3600
-    if (value > MAX_HOUR - 1.5) break
+    if (value > maxHour - 1.5) break
     if (value < 1.5 || d.getHours() % stepHours) continue
     ticks.push({ value, label: d.getHours() ? hourFmt.format(d) : dayFmt.format(d) })
   }
   return ticks
 }
 
-/** Which weather layer the map shows: the 0–48 h forecast risk, live radar, or neither. */
+/** Which weather layer the map shows: forecast risk (0–48 h or to arrival), live radar, or none. */
 export type MapLayer = 'forecast' | 'radar' | 'none'
 
 export interface TruckStatusLine {
@@ -52,6 +53,7 @@ export interface TruckStatusLine {
 
 interface Props {
   start: number | null // unix seconds of hour 0; null while loading
+  maxHour: number // 48, or more when the trip arrives later
   timeline: HourSummary[] | null
   status: TruckStatusLine | null
   hour: number
@@ -70,6 +72,7 @@ interface Props {
 
 export function HeatmapControls({
   start,
+  maxHour,
   timeline,
   status,
   hour,
@@ -85,6 +88,13 @@ export function HeatmapControls({
   loading,
   error,
 }: Props) {
+  // Speed is read through a ref, so changing it mid-playback doesn't restart the animation.
+  const [speed, setSpeed] = useState(1)
+  const speedRef = useRef(speed)
+  useEffect(() => {
+    speedRef.current = speed
+  }, [speed])
+
   // Animate with requestAnimationFrame so playback is as smooth as the display allows.
   useEffect(() => {
     if (!playing) return
@@ -92,10 +102,10 @@ export function HeatmapControls({
     let last = performance.now()
     let current = hour
     const tick = (now: number) => {
-      current += ((now - last) / 1000) * PLAY_HOURS_PER_SECOND
+      current += ((now - last) / 1000) * HOURS_PER_SECOND * speedRef.current
       last = now
-      if (current >= MAX_HOUR) {
-        onHour(MAX_HOUR)
+      if (current >= maxHour) {
+        onHour(maxHour)
         onPlaying(false)
         return
       }
@@ -110,8 +120,9 @@ export function HeatmapControls({
 
   const compact = useMediaQuery((theme) => theme.breakpoints.down('md'))
   const marks = useMemo(
-    () => (start === null ? [] : clockTicks(start, compact ? 12 : 6)),
-    [start, compact],
+    () =>
+      start === null ? [] : clockTicks(start, (compact ? 12 : 6) * (maxHour > 60 ? 2 : 1), maxHour),
+    [start, compact, maxHour],
   )
   const label =
     start === null ? '' : formatTime(new Date((start + hour * 3600) * 1000).toISOString())
@@ -139,7 +150,7 @@ export function HeatmapControls({
         <IconButton
           aria-label={playing ? 'Pause forecast animation' : 'Play forecast animation'}
           onClick={() => {
-            if (!playing && hour >= MAX_HOUR) onHour(0)
+            if (!playing && hour >= maxHour) onHour(0)
             onPlaying(!playing)
           }}
           disabled={!visible || start === null}
@@ -148,6 +159,18 @@ export function HeatmapControls({
         >
           {playing ? <PauseIcon /> : <PlayArrowIcon />}
         </IconButton>
+        {visible && (
+          <Button
+            size="small"
+            onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
+            disabled={start === null}
+            aria-label={`Playback speed ${speed}×, change`}
+            title="Playback speed"
+            sx={{ minWidth: 0, px: 0.75, py: 0, fontFamily: monoFont, fontSize: 12 }}
+          >
+            {speed}×
+          </Button>
+        )}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.3 }} noWrap>
             {live ? (
@@ -253,7 +276,7 @@ export function HeatmapControls({
             {timeline && (
               <RiskTimeline
                 timeline={timeline}
-                maxHour={MAX_HOUR}
+                maxHour={maxHour}
                 departHour={departHour}
                 arriveHour={arriveHour}
                 truckLevels={truckLevels}
@@ -267,7 +290,7 @@ export function HeatmapControls({
               aria-label="Forecast hour"
               value={hour}
               min={0}
-              max={MAX_HOUR}
+              max={maxHour}
               step={STEP}
               marks={marks}
               disabled={!visible || start === null}

@@ -51,3 +51,5 @@ class HeatmapRequestSerializer(serializers.Serializer):
         max_length=5,
     )
     weight_lb = serializers.IntegerField(min_value=MIN_WEIGHT_LB, max_value=MAX_WEIGHT_LB)
+    # Latest arrival among the routes: the heatmap extends past 48 h to cover it.
+    until = serializers.DateTimeField(required=False)

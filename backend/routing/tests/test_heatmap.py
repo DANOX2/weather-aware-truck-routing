@@ -61,3 +61,11 @@ def test_build_heatmap_packs_49_hours_per_cell(monkeypatch):
     assert {math.floor(v / INDEX_SCALE) for v in values} == {3}
     grid = result["grid"]
     assert max(result["cells"]) < grid["nx"] * grid["ny"]
+
+
+def test_heatmap_extends_to_the_latest_arrival_within_limits():
+    now = 1_000 * 3600
+    assert heatmap.hours_until(None, now) == 49
+    assert heatmap.hours_until(now + 10 * 3600, now) == 49  # never shorter than 0..48 h
+    assert heatmap.hours_until(now + 60.5 * 3600, now) == 62  # covers the arrival hour
+    assert heatmap.hours_until(now + 200 * 3600, now) == heatmap.MAX_HOURS
