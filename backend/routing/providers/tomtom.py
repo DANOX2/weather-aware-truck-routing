@@ -38,6 +38,10 @@ RELAXED_TIME_RATIO = 2.0
 RELAXED_OVERLAP = 0.9
 # Via-point offsets from the midpoint, as a share of crow-fly length: one wave per tuple.
 DETOUR_WAVES = ((0.15,), (0.30,))
+# Detours pass through a circle around each via-point rather than the exact point: an exact
+# point off the road network made TomTom drive a dead-end spur out to it and back.
+VIA_RADIUS_SHARE = 0.2  # of the via-point's offset from the midpoint
+VIA_RADIUS_M = (5_000, 50_000)
 OVERLAP_CELL_DEG = 0.1
 
 ROUTE_CACHE_TTL_S = 10 * 60  # traffic-aware, so keep it short
@@ -244,8 +248,18 @@ def _routing_params(depart_at: datetime | None, weight_lb: float) -> list[tuple[
     return params
 
 
-def _locations(*points: LatLon) -> str:
-    return ":".join(f"{lat:.5f},{lon:.5f}" for lat, lon in points)
+def via_radius_m(origin: LatLon, destination: LatLon, offset_share: float) -> float:
+    """Radius of the circle a detour must cross, scaled to how far its via-point is offset."""
+    km = math.dist(origin, destination) * 111 * offset_share  # rough degrees → km is enough
+    return min(max(km * 1000 * VIA_RADIUS_SHARE, VIA_RADIUS_M[0]), VIA_RADIUS_M[1])
+
+
+def _locations(*points: LatLon | tuple[float, float, float]) -> str:
+    """`lat,lon` per stop; a (lat, lon, radius_m) via becomes a circle the route only crosses."""
+    return ":".join(
+        f"circle({p[0]:.5f},{p[1]:.5f},{p[2]:.0f})" if len(p) == 3 else f"{p[0]:.5f},{p[1]:.5f}"
+        for p in points
+    )
 
 
 def _fetch_parallel(
@@ -285,7 +299,11 @@ def get_routes(
     routes: list[Route] = []
     with httpx.Client(timeout=settings.PROVIDER_TIMEOUT_S) as client:
         for wave, offsets in enumerate(DETOUR_WAVES):
-            vias = [v for share in offsets for v in detour_points(origin, destination, share)]
+            vias = [
+                (*v, via_radius_m(origin, destination, share))
+                for share in offsets
+                for v in detour_points(origin, destination, share)
+            ]
             legs = [(origin, v, destination) for v in vias]
             if wave == 0:
                 legs.insert(0, (origin, destination))

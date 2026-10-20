@@ -19,8 +19,10 @@ const timeFmt = new Intl.DateTimeFormat(undefined, {
 export const formatTime = (iso: string) => timeFmt.format(new Date(iso))
 
 export function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.round((seconds % 3600) / 60)
+  // Round to whole minutes first, so 8 h 59.6 min reads "9 h 00 min", not "8 h 60 min".
+  const minutes = Math.round(seconds / 60)
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
   return h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`
 }
 

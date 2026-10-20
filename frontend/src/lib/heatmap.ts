@@ -101,7 +101,37 @@ export type TruckStatus =
   | { phase: 'before' | 'arrived' }
   | { phase: 'en-route'; position: [number, number]; mile: number; checkpoint: Checkpoint }
 
-/** Where the truck is on a route at a unix time, interpolated between checkpoints. */
+// Cumulative length (in degrees, longitude scaled by latitude) at each vertex of a route's path.
+const pathLengths = new WeakMap<Route, number[]>()
+
+/** The point `share` (0–1) of the way along the drawn route, so the truck stays on the road. */
+export function pointAlongPath(route: Route, share: number): [number, number] {
+  const path = route.path
+  if (path.length < 2) return path[0]
+  let lengths = pathLengths.get(route)
+  if (!lengths) {
+    lengths = [0]
+    for (let i = 1; i < path.length; i++) {
+      const [[lon0, lat0], [lon1, lat1]] = [path[i - 1], path[i]]
+      const dx = (lon1 - lon0) * Math.cos((((lat0 + lat1) / 2) * Math.PI) / 180)
+      lengths.push(lengths[i - 1] + Math.hypot(dx, lat1 - lat0))
+    }
+    pathLengths.set(route, lengths)
+  }
+  const target = Math.min(Math.max(share, 0), 1) * lengths[lengths.length - 1]
+  let lo = 1
+  let hi = lengths.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (lengths[mid] < target) lo = mid + 1
+    else hi = mid
+  }
+  const t = (target - lengths[lo - 1]) / (lengths[lo] - lengths[lo - 1] || 1)
+  const [a, b] = [path[lo - 1], path[lo]]
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+/** Where the truck is on a route at a unix time: its mile by ETA, placed along the road. */
 export function truckStatus(route: Route, unixSeconds: number): TruckStatus {
   const cps = route.checkpoints
   const times = cps.map((cp) => Date.parse(cp.eta) / 1000)
@@ -113,10 +143,12 @@ export function truckStatus(route: Route, unixSeconds: number): TruckStatus {
   )
   const [a, b] = [cps[i - 1], cps[i]]
   const t = (unixSeconds - times[i - 1]) / (times[i] - times[i - 1] || 1)
+  const mile = a.mile + (b.mile - a.mile) * t
   return {
     phase: 'en-route',
-    position: [a.lon + (b.lon - a.lon) * t, a.lat + (b.lat - a.lat) * t],
-    mile: a.mile + (b.mile - a.mile) * t,
+    // Interpolating between checkpoints in a straight line cut corners off the road.
+    position: pointAlongPath(route, mile / (cps[cps.length - 1].mile || 1)),
+    mile,
     // The checkpoint whose stretch of road the truck is on (each covers half-way to neighbours).
     checkpoint: t < 0.5 ? a : b,
   }

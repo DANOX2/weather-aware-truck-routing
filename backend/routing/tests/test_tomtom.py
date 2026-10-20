@@ -14,6 +14,7 @@ from routing.providers.tomtom import (
     get_routes,
     search_places,
     select_routes,
+    via_radius_m,
 )
 from routing.sampling import RouteGeometry
 
@@ -93,8 +94,12 @@ def test_detour_points_sit_either_side_of_midpoint():
 
 
 def _points(request) -> list[tuple[float, float]]:
+    """Stops as (lat, lon); circle waypoints keep only their centre."""
     locations = request.url.path.split("/calculateRoute/")[1].removesuffix("/json")
-    return [tuple(map(float, p.split(","))) for p in locations.split(":")]
+    return [
+        tuple(map(float, p.removeprefix("circle(").removesuffix(")").split(",")[:2]))
+        for p in locations.split(":")
+    ]
 
 
 def corridor_by_via(fail_vias=(), hours=11.0, alternatives=()):
@@ -117,6 +122,17 @@ def corridor_by_via(fail_vias=(), hours=11.0, alternatives=()):
         return httpx.Response(200, json={"routes": [raw_route(via_lon_offset, hours=hours)]})
 
     return handler
+
+
+@respx.mock
+def test_detours_cross_a_circle_instead_of_an_exact_point():
+    ROUTING.mock(side_effect=corridor_by_via())
+    get_routes(DALLAS, DENVER, None, 40_000)
+    detour_path = ROUTING.calls[1].request.url.path
+    assert detour_path.count("circle(") == 1  # only the via; origin and destination stay exact
+    radius = float(detour_path.split("circle(")[1].split(")")[0].split(",")[2])
+    assert radius == round(via_radius_m(DALLAS, DENVER, 0.15))
+    assert 5_000 <= radius <= 50_000
 
 
 @respx.mock
