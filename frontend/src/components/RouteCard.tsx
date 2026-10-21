@@ -8,7 +8,7 @@ import {
   formatMiles,
   formatTime,
 } from '../lib/format.ts'
-import { monoFont, riskColors, routeColors, tokens } from '../theme.ts'
+import { monoFont, motion, riskColors, routeColors, tokens } from '../theme.ts'
 import { RiskStrip } from './RiskStrip.tsx'
 
 // Ranking criteria first; Moderate/Low are context, not decision drivers.
@@ -46,8 +46,10 @@ export function RouteCard({ route, recommended, selected, onSelect, onHover, why
         borderColor: selected ? color : recommended ? tokens.borderAccent : tokens.border,
         bgcolor: selected ? 'rgba(64, 224, 208, 0.06)' : tokens.surface,
         boxShadow: selected ? `0 0 0 1px ${color}` : 'none',
-        transition: 'border-color 150ms, background-color 150ms, box-shadow 150ms',
-        '&:hover': { borderColor: color },
+        transition: `border-color ${motion.fast} ${motion.ease}, background-color ${motion.fast} ${motion.ease}, box-shadow ${motion.fast} ${motion.ease}, transform ${motion.fast} ${motion.ease}`,
+        // A small lift tells you the card is the same object the map is highlighting.
+        '&:hover': { borderColor: color, transform: 'translateY(-2px)' },
+        '&:active': { transform: 'translateY(0)' },
         '&.Mui-focusVisible': { outline: `2px solid ${color}`, outlineOffset: 2 },
       }}
     >

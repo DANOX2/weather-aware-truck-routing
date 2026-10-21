@@ -14,6 +14,7 @@ import type { ApiError } from '../api/client.ts'
 import type { Trip } from '../api/types.ts'
 import { explainRecommendation } from '../lib/explain.ts'
 import { ROUTE_NAMES } from '../lib/format.ts'
+import { rise } from '../theme.ts'
 import { RiskLegend } from './RiskLegend.tsx'
 import { RouteCard } from './RouteCard.tsx'
 
@@ -87,7 +88,7 @@ export function Results({ trip, loading, error, onRetry, selectedId, onSelect, o
         </Alert>
       )}
 
-      <Box aria-live="polite">
+      <Box aria-live="polite" sx={rise()}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Typography variant="overline" sx={{ color: 'primary.main', lineHeight: 1.5 }}>
             Recommendation
@@ -122,15 +123,17 @@ export function Results({ trip, loading, error, onRetry, selectedId, onSelect, o
       </Box>
 
       <Stack spacing={1.5}>
-        {ranked.map((route) => (
-          <RouteCard
-            key={route.id}
-            route={route}
-            recommended={route.id === best}
-            selected={route.id === selectedId}
-            onSelect={() => onSelect(route.id)}
-            onHover={(hovering) => onHover(hovering ? route.id : null)}
-          />
+        {ranked.map((route, i) => (
+          // Staggered so the ranking reads top-down, the order the cards are already in.
+          <Box key={route.id} sx={rise(80 + i * 70)}>
+            <RouteCard
+              route={route}
+              recommended={route.id === best}
+              selected={route.id === selectedId}
+              onSelect={() => onSelect(route.id)}
+              onHover={(hovering) => onHover(hovering ? route.id : null)}
+            />
+          </Box>
         ))}
       </Stack>
 

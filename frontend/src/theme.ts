@@ -31,6 +31,26 @@ export const routeColors = ['#40E0D0', '#7AA2FF', '#D59BFF', '#F5F5F5', '#FFD3A8
 
 export const monoFont = '"DM Mono", ui-monospace, monospace'
 
+// One duration scale and one easing, so panels, cards and the map controls all settle the same
+// way instead of each picking its own timing. Decoration only: the reduced-motion rule in
+// MuiCssBaseline switches it all off, so no component has to remember to check.
+export const motion = {
+  fast: '140ms',
+  base: '220ms',
+  slow: '360ms',
+  ease: 'cubic-bezier(0.22, 0.61, 0.36, 1)', // decelerating, so things land rather than stop
+} as const
+
+/** Fade-and-rise entrance. `delay` staggers a list without a keyframe set per item. */
+export const rise = (delay = 0) => ({
+  animation: `rise ${motion.slow} ${motion.ease} both`,
+  animationDelay: `${delay}ms`,
+  '@keyframes rise': {
+    from: { opacity: 0, transform: 'translateY(8px)' },
+    to: { opacity: 1, transform: 'none' },
+  },
+})
+
 export const theme = createTheme({
   palette: {
     mode: 'dark',
@@ -53,6 +73,20 @@ export const theme = createTheme({
   components: {
     MuiPaper: {
       styleOverrides: { root: { backgroundImage: 'none', border: `1px solid ${tokens.border}` } },
+    },
+    MuiCssBaseline: {
+      styleOverrides: {
+        // Honour the OS setting in one place. Near-zero rather than `none` so animations still
+        // fire their end events and anything waiting on them isn't left hanging.
+        '@media (prefers-reduced-motion: reduce)': {
+          '*, *::before, *::after': {
+            animationDuration: '1ms !important',
+            animationIterationCount: '1 !important',
+            transitionDuration: '1ms !important',
+            scrollBehavior: 'auto !important',
+          },
+        },
+      },
     },
   },
 })
