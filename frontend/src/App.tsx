@@ -4,6 +4,7 @@ import { Suspense, lazy, useState } from 'react'
 
 import { type ApiError, fetchHeatmap, planTrip } from './api/client.ts'
 import type { TripRequest } from './api/types.ts'
+import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { Results } from './components/Results.tsx'
 import { TripForm } from './components/TripForm.tsx'
 import { tokens } from './theme.ts'
@@ -85,12 +86,12 @@ export default function App() {
           />
 
           <Results
-            trip={trip.data}
+              trip={trip.data}
             loading={trip.isFetching}
             error={error}
             onRetry={() => trip.refetch()}
             selectedId={selectedId ?? trip.data?.recommendation.route_id ?? null}
-            onSelect={setSelectedId}
+              onSelect={setSelectedId}
             onHover={setHoveredId}
           />
         </Stack>
@@ -106,18 +107,22 @@ export default function App() {
           minHeight: { xs: '62vh' },
         }}
       >
-        <Suspense fallback={null}>
-          <TripMap
-            trip={trip.data}
-            heatmap={heatmap.data}
-            heatmapLoading={heatmap.isFetching}
-            heatmapError={heatmap.isError}
-            selectedId={selectedId}
-            hoveredId={hoveredId}
-            onSelect={setSelectedId}
-            onHover={setHoveredId}
-          />
-        </Suspense>
+        {/* The map holds the WebGL contexts, so it is the part most likely to fall over; keep
+            the form and the route list alive if it does. */}
+        <ErrorBoundary label="the map" onReset={() => setRequest((r) => (r ? { ...r } : r))}>
+          <Suspense fallback={null}>
+            <TripMap
+              trip={trip.data}
+              heatmap={heatmap.data}
+              heatmapLoading={heatmap.isFetching}
+              heatmapError={heatmap.isError}
+              selectedId={selectedId}
+              hoveredId={hoveredId}
+              onSelect={setSelectedId}
+              onHover={setHoveredId}
+            />
+          </Suspense>
+        </ErrorBoundary>
       </Box>
     </Box>
   )
