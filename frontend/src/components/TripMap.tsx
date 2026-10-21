@@ -19,7 +19,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { RISK_LEVELS, type Checkpoint, type Heatmap, type Route, type Trip } from '../api/types.ts'
 import { describeCause } from '../lib/explain.ts'
 import { buildFrames, truckStatus } from '../lib/heatmap.ts'
-import { RISK_LABEL, ROUTE_NAMES, formatDuration, formatMiles, formatTime } from '../lib/format.ts'
+import { RISK_LABEL, ROUTE_NAMES, formatDuration, formatTime } from '../lib/format.ts'
 import { RADAR_ATTRIBUTION, RADAR_REFRESH_MS, radarScans, radarTileUrl } from '../lib/radar.ts'
 import { motion, riskColors, routeColors, tokens } from '../theme.ts'
 import { HeatmapControls, type MapLayer, type TruckStatusLine } from './HeatmapControls.tsx'
@@ -243,6 +243,44 @@ export default function TripMap({
         updateTriggers: { getColor: focusId, getWidth: focusId },
         transitions: { getWidth: 150 },
       }),
+      // Added before the checkpoints on purpose: deck.gl hands a hover to the last
+      // pickable layer under the pointer, so a label placed after them would take
+      // every dot it happens to cover.
+      new TextLayer<Route, CollisionFilterExtensionProps<Route>>({
+        id: 'route-labels',
+        data: routes,
+        getPosition: labelPosition,
+        getText: (r) =>
+          compactLabels
+            ? `Route ${ROUTE_NAMES[r.id]}`
+            : routeLabel(r, r.id === trip.recommendation.route_id),
+        getSize: 11,
+        lineHeight: 1.3,
+        fontFamily: '"DM Sans", system-ui, sans-serif',
+        fontWeight: 600,
+        characterSet: 'auto',
+        getColor: [255, 255, 255, 255],
+        background: true,
+        getBackgroundColor: (r) => rgba(tokens.navyDeep, isFocus(r) ? 240 : 200),
+        getBorderColor: (r) => rgba(routeColors[r.id % routeColors.length]),
+        getBorderWidth: (r) => (isFocus(r) ? 2 : 1),
+        backgroundPadding: [6, 3],
+        pickable: true,
+        onClick: ({ object }) => object && onSelect(object.id),
+        onHover: ({ object }) => onHover(object?.id ?? null),
+        extensions: [labelCollision],
+        collisionEnabled: true,
+        // The focused route's label wins a collision, then the recommended one.
+        getCollisionPriority: (r) =>
+          isFocus(r) ? 2 : r.id === trip.recommendation.route_id ? 1 : 0,
+        collisionTestProps: { sizeScale: 1.3 },
+        updateTriggers: {
+          getBackgroundColor: focusId,
+          getBorderWidth: focusId,
+          getCollisionPriority: focusId,
+          getText: compactLabels,
+        },
+      }),
       new ScatterplotLayer<CheckpointDatum>({
         id: 'checkpoints',
         data: checkpoints,
@@ -268,41 +306,6 @@ export default function TripMap({
               : null,
           ),
         updateTriggers: { getRadius: focusId, getFillColor: focusId, getLineColor: focusId },
-      }),
-      new TextLayer<Route, CollisionFilterExtensionProps<Route>>({
-        id: 'route-labels',
-        data: routes,
-        getPosition: labelPosition,
-        getText: (r) =>
-          compactLabels
-            ? `Route ${ROUTE_NAMES[r.id]}`
-            : routeLabel(r, r.id === trip.recommendation.route_id),
-        getSize: 12,
-        lineHeight: 1.35,
-        fontFamily: '"DM Sans", system-ui, sans-serif',
-        fontWeight: 600,
-        characterSet: 'auto',
-        getColor: [255, 255, 255, 255],
-        background: true,
-        getBackgroundColor: (r) => rgba(tokens.navyDeep, isFocus(r) ? 240 : 200),
-        getBorderColor: (r) => rgba(routeColors[r.id % routeColors.length]),
-        getBorderWidth: (r) => (isFocus(r) ? 2 : 1),
-        backgroundPadding: [7, 4],
-        pickable: true,
-        onClick: ({ object }) => object && onSelect(object.id),
-        onHover: ({ object }) => onHover(object?.id ?? null),
-        extensions: [labelCollision],
-        collisionEnabled: true,
-        // The focused route's label wins a collision, then the recommended one.
-        getCollisionPriority: (r) =>
-          isFocus(r) ? 2 : r.id === trip.recommendation.route_id ? 1 : 0,
-        collisionTestProps: { sizeScale: 1.3 },
-        updateTriggers: {
-          getBackgroundColor: focusId,
-          getBorderWidth: focusId,
-          getCollisionPriority: focusId,
-          getText: compactLabels,
-        },
       }),
       new ScatterplotLayer<{ position: [number, number]; color: RGBA }>({
         id: 'endpoints',
@@ -532,18 +535,14 @@ export default function TripMap({
 
 const TOOLTIP_WIDTH = 260
 
-/** Route summary pinned on the map, staggered along each route so labels rarely collide. */
+/**
+ * Route summary pinned on the map, staggered along each route so labels rarely collide. Kept to
+ * a name and a drive time: the worst-weather mileage used to ride along here too, which made
+ * every label wide enough to cover the road it belongs to. The route cards already carry it.
+ */
 function routeLabel(route: Route, recommended: boolean): string {
-  const miles = route.miles_by_level
-  const worst = miles.NO_TRAVEL
-    ? `${formatMiles(miles.NO_TRAVEL)} No travel`
-    : miles.SEVERE
-      ? `${formatMiles(miles.SEVERE)} Severe`
-      : miles.HIGH
-        ? `${formatMiles(miles.HIGH)} High`
-        : 'No Severe or High'
   const name = `Route ${ROUTE_NAMES[route.id]}${recommended ? ' · Recommended' : ''}`
-  return `${name}\n${formatDuration(route.duration_s)} · ${worst}`
+  return `${name}\n${formatDuration(route.duration_s)}`
 }
 
 function labelPosition(route: Route): [number, number] {
