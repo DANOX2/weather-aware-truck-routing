@@ -41,6 +41,9 @@ def geocode(request):
     query = request.query_params.get("q", "").strip()
     if len(query) < 3:
         return Response({"results": []})
+    if settings.DEMO_FIXTURES:
+        # Flagged so the form can say why a real city finds nothing, rather than look broken.
+        return Response({"results": demo.places(query), "demo": True})
     try:
         places = search_places(query[:120])
     except RoutingProviderError as exc:

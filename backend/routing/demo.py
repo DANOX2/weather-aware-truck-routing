@@ -42,6 +42,20 @@ def trip(depart_at: datetime) -> dict:
     return data
 
 
+# The two ends of the recorded trip, so the form can be filled without a routing key either.
+# Demo mode promises no TomTom calls, and autocomplete is a TomTom call like any other.
+DEMO_PLACES = [
+    {"label": "Dallas, TX, United States", "lat": 32.77671, "lon": -96.79702},
+    {"label": "Denver, CO, United States", "lat": 39.73923, "lon": -104.99025},
+]
+
+
+def places(query: str) -> list[dict]:
+    """Fixture matches for a typeahead query, filtered the way a search service would."""
+    needle = query.strip().lower()
+    return [p for p in DEMO_PLACES if needle in p["label"].lower()]
+
+
 def heatmap() -> dict:
     return _load("dallas-denver.heatmap.json") | {
         "start": int(time.time() // 3600 * 3600),

@@ -47,10 +47,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   throw new ApiError(code, MESSAGES[code] ?? MESSAGES.routing_unavailable)
 }
 
-export function searchPlaces(query: string, signal?: AbortSignal): Promise<Place[]> {
-  return request<{ results: Place[] }>(`/api/geocode/?q=${encodeURIComponent(query)}`, {
-    signal,
-  }).then((r) => r.results)
+export interface PlaceSearch {
+  results: Place[]
+  /** Fixtures mode: only the recorded trip's endpoints resolve, so an empty list is expected. */
+  demo?: boolean
+}
+
+export function searchPlaces(query: string, signal?: AbortSignal): Promise<PlaceSearch> {
+  return request<PlaceSearch>(`/api/geocode/?q=${encodeURIComponent(query)}`, { signal })
 }
 
 export function planTrip(trip: TripRequest): Promise<Trip> {

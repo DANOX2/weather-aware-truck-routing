@@ -137,6 +137,21 @@ def test_demo_mode_replays_recorded_trip_without_providers(client, settings, mon
     assert heat["demo"] is True
 
 
+def test_demo_mode_answers_place_search_without_providers(client, settings, monkeypatch):
+    # Autocomplete is a TomTom call like any other, so demo mode has to cover it too, or the
+    # form can't be filled without a key and the recorded trip is unreachable.
+    settings.DEMO_FIXTURES = True
+    monkeypatch.setattr(views, "search_places", lambda *a, **k: pytest.fail("no providers"))
+    body = client.get("/api/geocode/", {"q": "dall"}).json()
+    assert body["demo"] is True  # the form says so rather than reading as "no results"
+    results = body["results"]
+    assert [r["label"] for r in results] == ["Dallas, TX, United States"]
+    assert results[0]["lat"] == pytest.approx(32.77671)
+    assert client.get("/api/geocode/", {"q": "nowhere"}).json()["results"] == []
+    # Still short-circuits before the fixtures on a too-short query.
+    assert client.get("/api/geocode/", {"q": "da"}).json()["results"] == []
+
+
 def test_spa_index_is_served_without_caching(client, settings, tmp_path):
     (tmp_path / "index.html").write_text("<!doctype html><title>app</title>")
     settings.FRONTEND_DIST = tmp_path

@@ -21,6 +21,8 @@ export function PlaceAutocomplete({ label, value, onChange, error, autoFocus }: 
   const [options, setOptions] = useState<Place[]>([])
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
+  // Fixtures mode only resolves the recorded trip's endpoints; an empty list is expected there.
+  const [demo, setDemo] = useState(false)
 
   const query = input.trim()
   // Only search while the user is typing something new; a picked place needs no lookup.
@@ -33,7 +35,10 @@ export function PlaceAutocomplete({ label, value, onChange, error, autoFocus }: 
       setLoading(true)
       setFailed(false)
       searchPlaces(query, controller.signal)
-        .then(setOptions)
+        .then(({ results, demo: isDemo }) => {
+          setOptions(results)
+          setDemo(Boolean(isDemo))
+        })
         .catch(() => !controller.signal.aborted && setFailed(true))
         .finally(() => !controller.signal.aborted && setLoading(false))
     }, DEBOUNCE_MS)
@@ -48,7 +53,9 @@ export function PlaceAutocomplete({ label, value, onChange, error, autoFocus }: 
       ? 'Type at least 3 letters'
       : failed
         ? "Couldn't search places. Check your connection."
-        : 'No matching places'
+        : demo
+          ? 'Demo data: this build replays one recorded trip, so only Dallas, TX and Denver, CO resolve'
+          : 'No matching places'
 
   return (
     <Autocomplete
