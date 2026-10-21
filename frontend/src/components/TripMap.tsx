@@ -9,7 +9,6 @@ import {
   LngLatBounds,
   Map as MapLibre,
   NavigationControl,
-  type RasterTileSource,
   setWorkerUrl,
 } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -21,12 +20,7 @@ import { RISK_LEVELS, type Checkpoint, type Heatmap, type Route, type Trip } fro
 import { describeCause } from '../lib/explain.ts'
 import { buildFrames, truckStatus } from '../lib/heatmap.ts'
 import { RISK_LABEL, ROUTE_NAMES, formatDuration, formatMiles, formatTime } from '../lib/format.ts'
-import {
-  RADAR_ATTRIBUTION,
-  RADAR_REFRESH_MS,
-  latestRadarTime,
-  radarTileUrl,
-} from '../lib/radar.ts'
+import { RADAR_ATTRIBUTION, RADAR_REFRESH_MS, radarScans, radarTileUrl } from '../lib/radar.ts'
 import { riskColors, routeColors, tokens } from '../theme.ts'
 import { HeatmapControls, type MapLayer, type TruckStatusLine } from './HeatmapControls.tsx'
 
@@ -41,6 +35,9 @@ const DATA_CREDITS = [
 const labelCollision = new CollisionFilterExtension() // hides a label that would overlap another
 // Checkpoints the truck passes this close to the slider's time get a ring.
 const NOW_WINDOW_S = 45 * 60
+// Reflectivity over the dark basemap: strong enough to read, light enough to keep roads visible.
+const RADAR_OPACITY = 0.85
+const radarLayerId = (scan: string) => `radar-${scan}`
 
 type RGBA = [number, number, number, number]
 const rgba = (hex: string, alpha = 255): RGBA => [
@@ -81,6 +78,8 @@ export default function TripMap({
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<MapLibre | null>(null)
   const overlay = useRef<MapboxOverlay | null>(null)
+  // Layer ids currently on the map, oldest scan first; the loop indexes straight into this.
+  const radarIds = useRef<string[]>([])
   const [tooltip, setTooltip] = useState<Omit<TooltipProps, 'trip'> | null>(null)
   const [styleReady, setStyleReady] = useState(false)
   // Small screens get name-only labels; the route cards sit right below the map there.
@@ -312,45 +311,77 @@ export default function TripMap({
     )
   }, [frames, focusRoute, heatVisible, hour])
 
-  // Live radar: the latest scan time, refreshed every 2 minutes while the radar is on.
-  const radarScan = useQuery({
-    queryKey: ['radar-scan'],
-    queryFn: ({ signal }) => latestRadarTime(signal),
+  // Live radar: the recent scan list, re-read every 2 minutes while the radar is on.
+  const radarQuery = useQuery({
+    queryKey: ['radar-scans'],
+    queryFn: ({ signal }) => radarScans(signal),
     enabled: layer === 'radar',
     refetchInterval: RADAR_REFRESH_MS,
     staleTime: RADAR_REFRESH_MS / 2,
   })
-  const scan = layer === 'radar' ? (radarScan.data ?? null) : null
+  const scans = layer === 'radar' ? (radarQuery.data ?? null) : null
+  const [frame, setFrame] = useState(0)
 
-  // A MapLibre raster layer (under the basemap's labels), so tiles stream and cache natively.
+  // A fresh scan list arrives every couple of minutes; ride it to the newest frame, the way a
+  // live radar should sit when nobody is scrubbing.
+  const [shownScans, setShownScans] = useState(scans)
+  if (scans !== shownScans) {
+    setShownScans(scans)
+    setFrame(scans ? scans.length - 1 : 0)
+  }
+
+  // One MapLibre raster layer per scan, under the basemap's labels, so tiles stream and cache
+  // natively. Every frame is already on the GPU by the time it is wanted, which leaves playback
+  // nothing to do but edit opacity: no fetching mid-loop, so nothing to stutter on.
   useEffect(() => {
     const instance = map.current
     if (!instance || !styleReady) return
-    const source = instance.getSource<RasterTileSource>('radar')
-    if (!scan) {
-      if (source) {
-        instance.removeLayer('radar')
-        instance.removeSource('radar')
-      }
-      return
+    const wanted = (scans ?? []).map(radarLayerId)
+    for (const id of radarIds.current) {
+      if (wanted.includes(id)) continue // scan still in the loop; keep its tiles
+      if (instance.getLayer(id)) instance.removeLayer(id)
+      if (instance.getSource(id)) instance.removeSource(id)
     }
-    if (source) {
-      source.setTiles([radarTileUrl(scan)])
-      return
-    }
-    instance.addSource('radar', {
-      type: 'raster',
-      tiles: [radarTileUrl(scan)],
-      tileSize: 256,
-      maxzoom: 10,
-      attribution: RADAR_ATTRIBUTION,
-    })
     const firstLabel = instance.getStyle().layers.find((l) => l.type === 'symbol')?.id
-    instance.addLayer(
-      { id: 'radar', type: 'raster', source: 'radar', paint: { 'raster-opacity': 0.8 } },
-      firstLabel,
-    )
-  }, [scan, styleReady])
+    for (const [i, id] of wanted.entries()) {
+      if (instance.getSource(id)) continue
+      instance.addSource(id, {
+        type: 'raster',
+        tiles: [radarTileUrl(scans![i])],
+        tileSize: 256,
+        maxzoom: 10,
+        attribution: RADAR_ATTRIBUTION, // identical strings, so the control shows one credit
+      })
+      instance.addLayer(
+        {
+          id,
+          type: 'raster',
+          source: id,
+          // Start hidden and let the loop below place it; MapLibre's own cross-fade would
+          // fight ours, so it is off.
+          paint: { 'raster-opacity': 0, 'raster-fade-duration': 0 },
+        },
+        firstLabel,
+      )
+    }
+    radarIds.current = wanted
+  }, [scans, styleReady])
+
+  // The playhead. The frame under it stays at full strength and the next one fades in on top,
+  // so coverage never dips the way two half-faded frames would, and the weather reads as moving
+  // rather than blinking between scans.
+  useEffect(() => {
+    const instance = map.current
+    if (!instance) return
+    const lower = Math.floor(frame)
+    const blend = frame - lower
+    radarIds.current.forEach((id, i) => {
+      if (!instance.getLayer(id)) return
+      const opacity =
+        i === lower ? RADAR_OPACITY : i === lower + 1 ? RADAR_OPACITY * blend : 0
+      instance.setPaintProperty(id, 'raster-opacity', opacity)
+    })
+  }, [frame, scans])
 
   // Per-frame layers: two forecast hours cross-faded, plus the truck at that moment.
   useEffect(() => {
@@ -418,7 +449,7 @@ export default function TripMap({
           onPlaying={setPlaying}
           layer={layer}
           onLayer={setLayer}
-          radar={{ scan, error: radarScan.isError }}
+          radar={{ scans, frame, onFrame: setFrame, error: radarQuery.isError }}
           departHour={departHour}
           arriveHour={arriveHour}
           truckLevels={truckLevels}

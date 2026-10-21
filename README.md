@@ -15,7 +15,7 @@ Picks the safest truck route by checking the forecast **at each checkpoint for t
 4. **One route is recommended**, with a plain explanation of how it beat each alternative, e.g. *"vs Route B: fewer Severe miles (0 mi vs 31 mi)"*.
 5. **The map** shows every route with a summary label (time and worst risk), the checkpoints coloured by risk, and tooltips with the cause ("38 mph gusts with a 42,000 lb load"), the ETA and the forecast hour used.
 6. **A 0–48 h heatmap** along the trip corridor has a slider and a play button (0.5×–2× speed). It extends past 48 h when a trip arrives later, so the truck can always be followed to arrival. Above the slider, a risk-over-time chart shows when bad weather peaks, so you don't have to scrub to find the storm: each bar is the share of the corridor at each risk level, and under the trip window a line takes the colours of the truck's own checkpoints. A truck marker and a status line follow the selected hour: *"Route A · mile 441 · Moderate: 0.30 in/hr rain"*, then *"arrived … · corridor forecast only"* once the trip is over. The checkpoints the truck passes around the selected hour get a ring, so you know which dots to compare with the shading.
-7. **Live radar** (one switch away from the forecast): NOAA's current US radar, coloured by precipitation **type**: rain, cool rain, snow, storms, hail and tropical rain. It refreshes every 2 minutes. The forecast stays the planning layer; the radar shows what is falling right now.
+7. **Live radar** (one switch away from the forecast): NOAA's US radar as **composite reflectivity**, so colour is intensity — drizzle through hail — rather than a precipitation category. The last ~25 minutes of scans play as a loop you can scrub, which is what shows the direction a storm is travelling. A scan lands every 2 minutes and the loop picks it up on its own. The forecast stays the planning layer; the radar shows what is falling right now.
 
 ## How the recommendation works
 
@@ -81,7 +81,7 @@ Provider failures come back as stable codes (`no_route`, `rate_limited`, `weathe
 | Truck routing | **TomTom** (`travelMode=truck`, `vehicleWeight`, live traffic) | Truck-aware, gives travel time along the route, free tier with no card |
 | Routing fallback | **Valhalla** (OpenStreetMap, public server) | Used automatically if TomTom is down or rate-limited. The UI notes that live traffic isn't included. |
 | Forecast | **Open-Meteo** hourly | No key, many points per request, mph and inches |
-| Live radar | **NOAA MRMS** precipitation type (WMS) | Free, no key, CORS-enabled, a new US scan about every 2 min; loaded straight by the browser as map tiles |
+| Live radar | **NOAA MRMS** composite reflectivity (WMS) | Free, no key, CORS-enabled, a new US scan about every 2 min, two hours kept; loaded straight by the browser as map tiles |
 | Basemap | CARTO Dark Matter | No key; matches the dark UI |
 
 Speed and quota choices:
@@ -132,7 +132,7 @@ npm run dev
 ## Tests and quality
 
 ```bash
-cd backend  && uv run pytest && uv run ruff check .     # 121 tests, providers mocked
+cd backend  && uv run pytest && uv run ruff check .     # 122 tests, providers mocked
 cd frontend && npm run lint && npm run build             # oxlint + type check
 ```
 

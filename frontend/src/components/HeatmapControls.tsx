@@ -17,17 +17,23 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { HourSummary } from '../lib/heatmap.ts'
 import { formatTime } from '../lib/format.ts'
-import { PRECIP_TYPES } from '../lib/radar.ts'
-import { monoFont, tokens } from '../theme.ts'
+import { DBZ_RAMP } from '../lib/radar.ts'
+import { monoFont, rise, tokens } from '../theme.ts'
 import { RiskLegend } from './RiskLegend.tsx'
 import { RiskTimeline } from './RiskTimeline.tsx'
 
 const STEP = 0.25 // quarter-hour steps; the map cross-fades between forecast hours
 const HOURS_PER_SECOND = 2 // at 1× playback
 const SPEEDS = [0.5, 1, 1.5, 2]
+// Radar scans land ~2 min apart; this is the pace they replay at, not the pace they arrive.
+const SCANS_PER_SECOND = 2.5
+// A beat on the newest scan before the loop restarts, so the end of the sweep reads as the end.
+const RADAR_HOLD = 1.2
 
 const hourFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric' })
 const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' })
+// Scan times are minutes old, so the weekday `formatTime` carries would only be noise.
+const scanFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 
 /** Slider ticks on local clock hours (every 6–24 h by width and range); midnight shows the day. */
 function clockTicks(start: number, stepHours: number, maxHour: number) {
@@ -62,7 +68,12 @@ interface Props {
   onPlaying: (playing: boolean) => void
   layer: MapLayer
   onLayer: (layer: MapLayer) => void
-  radar: { scan: string | null; error: boolean }
+  radar: {
+    scans: string[] | null // recent scan times, oldest first
+    frame: number // playhead, fractional between scans while cross-fading
+    onFrame: (frame: number) => void
+    error: boolean
+  }
   departHour: number | null
   arriveHour: number | null
   truckLevels: (number | null)[] | null
@@ -97,7 +108,7 @@ export function HeatmapControls({
 
   // Animate with requestAnimationFrame so playback is as smooth as the display allows.
   useEffect(() => {
-    if (!playing) return
+    if (!playing || layer === 'radar') return
     let frame = 0
     let last = performance.now()
     let current = hour
@@ -116,7 +127,29 @@ export function HeatmapControls({
     return () => cancelAnimationFrame(frame)
     // Restart only when play toggles; `hour` is read once as the starting point.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing])
+  }, [playing, layer])
+
+  // The radar's own loop: unlike the forecast it repeats, because the interesting thing is the
+  // direction the weather is travelling and you only see that on the second pass.
+  const scanCount = radar.scans?.length ?? 0
+  useEffect(() => {
+    if (!playing || layer !== 'radar' || scanCount < 2) return
+    const lastFrame = scanCount - 1
+    let frame = 0
+    let last = performance.now()
+    let current = radar.frame >= lastFrame ? 0 : radar.frame
+    const tick = (now: number) => {
+      current += ((now - last) / 1000) * SCANS_PER_SECOND * speedRef.current
+      last = now
+      if (current >= lastFrame + RADAR_HOLD) current = 0
+      radar.onFrame(Math.min(current, lastFrame))
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+    // `radar.frame` is the starting point only, as above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, layer, scanCount])
 
   const compact = useMediaQuery((theme) => theme.breakpoints.down('md'))
   const marks = useMemo(
@@ -128,6 +161,23 @@ export function HeatmapControls({
     start === null ? '' : formatTime(new Date((start + hour * 3600) * 1000).toISOString())
   const visible = layer === 'forecast'
   const live = layer === 'radar'
+  // Where the playhead sits, and how far back that scan is.
+  const shownScan = radar.scans?.[Math.round(radar.frame)] ?? null
+  const atLatestScan = scanCount > 0 && Math.round(radar.frame) === scanCount - 1
+  const minutesAgo = shownScan
+    ? Math.max(0, Math.round((Date.now() - Date.parse(shownScan)) / 60_000))
+    : 0
+  // One tick per scan: the loop is short enough that the ticks read as the scans themselves.
+  const scanMarks = useMemo(
+    () => Array.from({ length: scanCount }, (_, i) => ({ value: i })),
+    [scanCount],
+  )
+  const loopMinutes =
+    radar.scans && radar.scans.length > 1
+      ? Math.round(
+          (Date.parse(radar.scans[radar.scans.length - 1]) - Date.parse(radar.scans[0])) / 60_000,
+        )
+      : 0
 
   return (
     <Paper
@@ -144,26 +194,27 @@ export function HeatmapControls({
         zIndex: 3, // above deck.gl's canvas (inside MapLibre's z-index 2 control layer)
         bgcolor: 'rgba(13, 30, 45, 0.9)',
         backdropFilter: 'blur(6px)',
+        ...rise(),
       }}
     >
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <IconButton
           aria-label={playing ? 'Pause forecast animation' : 'Play forecast animation'}
           onClick={() => {
-            if (!playing && hour >= maxHour) onHour(0)
+            if (!playing && !live && hour >= maxHour) onHour(0)
             onPlaying(!playing)
           }}
-          disabled={!visible || start === null}
+          disabled={live ? scanCount < 2 : !visible || start === null}
           size="small"
           color="primary"
         >
           {playing ? <PauseIcon /> : <PlayArrowIcon />}
         </IconButton>
-        {visible && (
+        {(visible || live) && (
           <Button
             size="small"
             onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
-            disabled={start === null}
+            disabled={live ? scanCount < 2 : start === null}
             aria-label={`Playback speed ${speed}×, change`}
             title="Playback speed"
             sx={{ minWidth: 0, px: 0.75, py: 0, fontFamily: monoFont, fontSize: 12 }}
@@ -175,17 +226,34 @@ export function HeatmapControls({
           <Typography variant="subtitle2" sx={{ fontWeight: 700, lineHeight: 1.3 }} noWrap>
             {live ? (
               <>
-                <Box component="span" sx={{ color: 'error.main', mr: 0.75 }}>
-                  ● LIVE
+                <Box
+                  component="span"
+                  sx={{
+                    color: 'error.main',
+                    mr: 0.75,
+                    // Only the newest scan is "live"; scrub back and the pulse stops.
+                    animation: atLatestScan ? 'radarPulse 2s ease-in-out infinite' : 'none',
+                    '@keyframes radarPulse': {
+                      '0%, 100%': { opacity: 1 },
+                      '50%': { opacity: 0.35 },
+                    },
+                  }}
+                >
+                  ●
                 </Box>
-                Radar {radar.scan && `· scan of ${formatTime(radar.scan)}`}
+                Radar {shownScan && `· ${scanFmt.format(new Date(shownScan))}`}
+                {shownScan && (
+                  <Box component="span" sx={{ color: 'text.secondary', fontWeight: 400 }}>
+                    {atLatestScan ? ' · live' : ` · ${minutesAgo} min ago`}
+                  </Box>
+                )}
               </>
             ) : (
               <>Weather risk {label && `· ${label}`}</>
             )}
           </Typography>
         </Box>
-        {(live ? !radar.scan && !radar.error : loading) && (
+        {(live ? scanCount === 0 && !radar.error : loading) && (
           <CircularProgress size={16} aria-label="Loading weather layer" />
         )}
         <ToggleButtonGroup
@@ -212,7 +280,7 @@ export function HeatmapControls({
           >
             {radar.error
               ? "Couldn't reach the NOAA radar service"
-              : "What's falling now, by type · new scan every 2 min · US only"}
+              : `Observed rain and snow intensity · last ${loopMinutes || 25} min, looping · US only`}
           </Typography>
         ) : (
           <Stack direction="row" spacing={0.75} sx={{ alignItems: 'baseline', minWidth: 0 }}>
@@ -254,22 +322,69 @@ export function HeatmapControls({
       </Box>
 
       {live ? (
-        <Stack
-          direction="row"
-          sx={{ flexWrap: 'wrap', columnGap: 1.5, rowGap: 0.5, mt: 1, alignItems: 'center' }}
-        >
-          {PRECIP_TYPES.map(({ label: name, color }) => (
-            <Stack key={name} direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-              <Box sx={{ width: 14, height: 8, borderRadius: 0.5, bgcolor: color }} />
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {name}
-              </Typography>
-            </Stack>
-          ))}
-          <Typography variant="caption" sx={{ color: 'text.secondary', width: '100%' }}>
-            Observed now. Route dots still show the forecast for when your truck gets there.
+        <>
+          <Box sx={{ px: 1, mt: 1 }}>
+            <Slider
+              aria-label="Radar scan"
+              value={radar.frame}
+              min={0}
+              max={Math.max(scanCount - 1, 0)}
+              // Fine enough to scrub through the cross-fade instead of snapping scan to scan.
+              step={0.01}
+              marks={scanMarks}
+              disabled={scanCount < 2}
+              onChange={(_, value) => {
+                onPlaying(false)
+                radar.onFrame(value as number)
+              }}
+              valueLabelDisplay="off"
+              getAriaValueText={() =>
+                shownScan ? `Radar scan of ${scanFmt.format(new Date(shownScan))}` : ''
+              }
+              track={false}
+              sx={{
+                '& .MuiSlider-rail': { opacity: 0.25 },
+                '& .MuiSlider-mark': {
+                  height: 6,
+                  width: '1px',
+                  bgcolor: tokens.textMuted,
+                  opacity: 0.4,
+                },
+                // The playhead is driven by rAF; a CSS transition on top would smear it.
+                '& .MuiSlider-thumb': { transition: 'none' },
+                '& .MuiSlider-track': { transition: 'none' },
+              }}
+            />
+          </Box>
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ alignItems: 'center', mt: -0.5, mb: 0.5, px: 1 }}
+          >
+            <Typography variant="caption" sx={{ color: 'text.secondary', flexShrink: 0 }}>
+              Light
+            </Typography>
+            <Box
+              sx={{
+                flex: 1,
+                height: 8,
+                borderRadius: 1,
+                // The service's own ramp, so a cell on the map lands somewhere on this bar.
+                background: `linear-gradient(90deg, ${DBZ_RAMP.join(', ')})`,
+              }}
+            />
+            <Typography variant="caption" sx={{ color: 'text.secondary', flexShrink: 0 }}>
+              Hail
+            </Typography>
+          </Stack>
+          <Typography
+            variant="caption"
+            sx={{ color: 'text.secondary', display: { xs: 'none', md: 'block' } }}
+          >
+            Radar shows what is falling now. Route dots stay on the forecast for when your truck
+            gets there.
           </Typography>
-        </Stack>
+        </>
       ) : (
         <>
           <Box sx={{ px: 1, mt: 1 }}>
