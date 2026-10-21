@@ -1,3 +1,5 @@
+import time
+
 import httpx
 import pytest
 import respx
@@ -66,6 +68,76 @@ def test_provider_failure_raises_domain_error():
     respx.get(URL).mock(return_value=httpx.Response(503))
     with pytest.raises(WeatherProviderError):
         get_forecasts([(30.0, -90.0)])
+
+
+@respx.mock
+def test_a_slow_moment_is_retried_before_giving_up(monkeypatch):
+    monkeypatch.setattr(open_meteo, "RETRY_BACKOFF_S", 0)
+    route = respx.get(URL).mock(
+        side_effect=[httpx.Response(503), httpx.Response(200, json=_location())]
+    )
+    forecast = get_forecasts([(30.0, -90.0)])[snap(30.0, -90.0)]
+    assert route.call_count == 2
+    assert forecast.gust_mph[0] == 30.0
+
+
+@respx.mock
+def test_the_retry_allows_longer_to_answer(monkeypatch):
+    monkeypatch.setattr(open_meteo, "RETRY_BACKOFF_S", 0)
+    timeouts = []
+
+    def record(request):
+        timeouts.append(request.extensions["timeout"]["read"])
+        return httpx.Response(503) if len(timeouts) == 1 else httpx.Response(200, json=_location())
+
+    respx.get(URL).mock(side_effect=record)
+    get_forecasts([(30.0, -90.0)])
+    assert timeouts[1] > timeouts[0]
+
+
+@respx.mock
+def test_a_rate_limit_is_not_retried(monkeypatch):
+    # The budget is per IP and per minute, so a second call only spends more of it.
+    monkeypatch.setattr(open_meteo, "RETRY_BACKOFF_S", 0)
+    route = respx.get(URL).mock(return_value=httpx.Response(429, json={"reason": "minutely"}))
+    with pytest.raises(WeatherProviderError) as err:
+        get_forecasts([(30.0, -90.0)])
+    assert err.value.code == "weather_rate_limited"
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_batches_overlap_instead_of_running_in_series(monkeypatch):
+    monkeypatch.setattr(open_meteo, "BATCH_SIZE", 1)
+    delay = 0.25
+
+    def slow(request):
+        time.sleep(delay)
+        return httpx.Response(200, json=_location())
+
+    respx.get(URL).mock(side_effect=slow)
+    started = time.monotonic()
+    result = get_forecasts([(30.0, -90.0), (31.0, -90.0), (32.0, -90.0), (33.0, -90.0)])
+    elapsed = time.monotonic() - started
+    assert len(result) == 4
+    # In series this is four delays; overlapped it is about one.
+    assert elapsed < delay * 2.5
+
+
+@respx.mock
+def test_a_failed_batch_still_caches_the_ones_that_landed(monkeypatch):
+    monkeypatch.setattr(open_meteo, "BATCH_SIZE", 1)
+    monkeypatch.setattr(open_meteo, "RETRY_BACKOFF_S", 0)
+
+    def by_latitude(request):
+        bad = request.url.params["latitude"] == "31"
+        return httpx.Response(503) if bad else httpx.Response(200, json=_location())
+
+    respx.get(URL).mock(side_effect=by_latitude)
+    with pytest.raises(WeatherProviderError):
+        get_forecasts([(30.0, -90.0), (31.0, -90.0)])
+    # Retrying from the UI should only have to fetch what is still missing.
+    assert cache.get(open_meteo._cache_key(snap(30.0, -90.0))) is not None
 
 
 def test_index_at_picks_nearest_hour():

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import math
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 import httpx
@@ -18,9 +20,19 @@ logger = logging.getLogger(__name__)
 
 GRID_DEG = 0.1
 FORECAST_HOURS = 120  # departure ≤ 48 h out + longest US drive time, with margin
-BATCH_SIZE = 100  # locations per request; keeps URLs well under server limits
+# Locations per request. Small batches run several at a time and, more importantly, keep one
+# slow response from deciding the whole wall time: a trip used to be one or two large requests
+# in series, so a single sluggish one blew the timeout and surfaced as "forecast unavailable".
+BATCH_SIZE = 25
+MAX_CONCURRENCY = 4
 CACHE_TTL_S = 30 * 60
 HOURLY_VARS = "wind_speed_10m,wind_gusts_10m,rain,showers,snowfall"
+
+# Open-Meteo's latency for the same request varies by a factor of several, so one attempt is not
+# evidence the forecast is unavailable. Retry once, with longer to answer and a short pause.
+ATTEMPTS = 2
+RETRY_BACKOFF_S = 0.4
+RETRY_TIMEOUT_FACTOR = 2.0
 
 
 class WeatherProviderError(Exception):
@@ -79,7 +91,9 @@ def _parse(payload: dict) -> HourlyForecast:
     )
 
 
-def _fetch_batch(client: httpx.Client, points: list[tuple[float, float]]) -> list[HourlyForecast]:
+def _fetch_batch(
+    client: httpx.Client, points: list[tuple[float, float]], timeout: float | None = None
+) -> list[HourlyForecast]:
     params = {
         "latitude": ",".join(_fmt(p[0]) for p in points),
         "longitude": ",".join(_fmt(p[1]) for p in points),
@@ -91,7 +105,8 @@ def _fetch_batch(client: httpx.Client, points: list[tuple[float, float]]) -> lis
         "forecast_hours": FORECAST_HOURS,
     }
     try:
-        response = client.get(settings.OPEN_METEO_URL, params=params)
+        kwargs = {} if timeout is None else {"timeout": timeout}
+        response = client.get(settings.OPEN_METEO_URL, params=params, **kwargs)
     except httpx.HTTPError as exc:
         raise WeatherProviderError(f"Open-Meteo request failed: {type(exc).__name__}") from exc
     if response.status_code == 429:
@@ -115,6 +130,33 @@ def _fetch_batch(client: httpx.Client, points: list[tuple[float, float]]) -> lis
     return [_parse(item) for item in items]
 
 
+def _fetch_with_retry(
+    client: httpx.Client, points: list[tuple[float, float]]
+) -> list[HourlyForecast]:
+    """One batch, retried once with longer to answer.
+
+    A rate limit is never retried: the budget is per IP and per minute, so a second call would
+    only spend more of it and fail the same way. Anything else — a timeout, a dropped
+    connection, a 5xx — is treated as the service having a slow moment.
+    """
+    for attempt in range(ATTEMPTS):
+        timeout = settings.PROVIDER_TIMEOUT_S * RETRY_TIMEOUT_FACTOR**attempt
+        try:
+            return _fetch_batch(client, points, timeout)
+        except WeatherProviderError as exc:
+            if exc.code == "weather_rate_limited" or attempt == ATTEMPTS - 1:
+                raise
+            logger.warning(
+                "Open-Meteo retrying %d locations after %s (attempt %d of %d)",
+                len(points),
+                exc,
+                attempt + 1,
+                ATTEMPTS,
+            )
+            time.sleep(RETRY_BACKOFF_S)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 def get_forecasts(
     coords: list[tuple[float, float]], grid_deg: float = GRID_DEG
 ) -> dict[tuple[float, float], HourlyForecast]:
@@ -126,13 +168,30 @@ def get_forecasts(
     cached = cache.get_many([_cache_key(p) for p in wanted])
     result = {p: cached[_cache_key(p)] for p in wanted if _cache_key(p) in cached}
     missing = [p for p in wanted if p not in result]
+    batches = [missing[i : i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
+
+    def store(batch: list[tuple[float, float]], forecasts: list[HourlyForecast]) -> None:
+        fetched = dict(zip(batch, forecasts, strict=True))
+        cache.set_many({_cache_key(p): f for p, f in fetched.items()}, CACHE_TTL_S)
+        result.update(fetched)
 
     with httpx.Client(timeout=settings.PROVIDER_TIMEOUT_S) as client:
-        for i in range(0, len(missing), BATCH_SIZE):
-            batch = missing[i : i + BATCH_SIZE]
-            fetched = dict(zip(batch, _fetch_batch(client, batch), strict=True))
-            cache.set_many({_cache_key(p): f for p, f in fetched.items()}, CACHE_TTL_S)
-            result.update(fetched)
+        if len(batches) == 1:
+            store(batches[0], _fetch_with_retry(client, batches[0]))
+        elif batches:
+            # Batches are independent, so they go out together rather than one after another.
+            with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENCY, len(batches))) as pool:
+                pending = {pool.submit(_fetch_with_retry, client, b): b for b in batches}
+                failure: WeatherProviderError | None = None
+                for future in as_completed(pending):
+                    try:
+                        store(pending[future], future.result())
+                    except WeatherProviderError as exc:
+                        # Keep going: the batches that did land are worth caching, so a retry
+                        # from the UI only has to fetch what is still missing.
+                        failure = failure or exc
+            if failure:
+                raise failure
     return result
 
 
