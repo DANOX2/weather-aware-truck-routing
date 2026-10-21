@@ -89,15 +89,26 @@ Speed and quota choices:
 - Open-Meteo counts every location as a call (10k/day, 600/min). Coordinates are snapped to a 0.1° grid and shared between routes. The heatmap only fetches a **corridor** of at most 300 cells.
 - Everything is cached: routes for 10 min, forecasts for 30 min, searches for 1 day. Redis is used when `REDIS_URL` is set, in-process memory otherwise.
 
-## Performance (measured on the hosted app)
+## Performance (from the hosted app's request logs)
 
-| | Result |
-|---|---|
-| Plan a trip, fresh (Dallas → Denver, 3 routes) | **3.3 s** |
-| Plan the same trip, cached | 0.39 s |
-| Heatmap, all 49 hours | 1.5 s · 14 KB |
-| Slider playback (Intel UHD 620, production build) | **60 fps**, 95% of frames under 16.8 ms |
-| Initial JavaScript | 149 KB brotli; map code lazy-loaded |
+Cloud Run records the latency of every request it serves. These are its own numbers for the last
+30 days, split by whether the corridor's forecast was already cached, rather than a good run
+picked by hand.
+
+| | Median | p90 |
+|---|---|---|
+| Plan a trip, fresh — 3 routes, forecast at every checkpoint | **3.6 s** | 17 s |
+| Plan the same trip again, within the 30-minute cache | **0.11 s** | — |
+| Heatmap, all 49 hours · 14 KB (9 KB on the wire) | 1.2 s | 4.0 s |
+| Heatmap, cached | 0.22 s | — |
+| Slider playback (Intel UHD 620, production build) | **60 fps**, 95% of frames under 16.8 ms | |
+| Initial JavaScript | 149 KB brotli; map code lazy-loaded | |
+
+That p90 is worth being straight about: it is upstream, not in this code. A fresh trip cannot
+answer before TomTom and Open-Meteo do, and Open-Meteo's latency for an identical request has
+been measured at both 2 s and 13 s. Forecast locations therefore go out in small concurrent
+batches, each retried once with longer to answer, so a slow provider costs seconds instead of
+becoming the `weather_unavailable` error the UI used to show.
 
 The slider never touches the network. Each forecast hour is painted once into a cached GPU texture, and scrubbing only cross-fades between two of them.
 
