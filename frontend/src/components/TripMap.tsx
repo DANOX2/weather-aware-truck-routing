@@ -21,7 +21,7 @@ import { describeCause } from '../lib/explain.ts'
 import { buildFrames, truckStatus } from '../lib/heatmap.ts'
 import { RISK_LABEL, ROUTE_NAMES, formatDuration, formatMiles, formatTime } from '../lib/format.ts'
 import { RADAR_ATTRIBUTION, RADAR_REFRESH_MS, radarScans, radarTileUrl } from '../lib/radar.ts'
-import { riskColors, routeColors, tokens } from '../theme.ts'
+import { motion, riskColors, routeColors, tokens } from '../theme.ts'
 import { HeatmapControls, type MapLayer, type TruckStatusLine } from './HeatmapControls.tsx'
 
 setWorkerUrl(workerUrl)
@@ -102,7 +102,15 @@ export default function TripMap({
       new AttributionControl({ compact: true, customAttribution: DATA_CREDITS }),
       'top-left',
     )
-    instance.once('load', () => setStyleReady(true))
+    instance.once('load', () => {
+      setStyleReady(true)
+      // The compact control is created open, which lays a bar straight across the routes on a
+      // freshly fitted map. Start it closed; the toggle is always there to open it.
+      instance
+        .getContainer()
+        .querySelector('.maplibregl-ctrl-attrib')
+        ?.classList.remove('maplibregl-compact-show')
+    })
     // Overlaid (own canvas): deck.gl 9.4's interleaved mode does not render with MapLibre 6.
     const deck = new MapboxOverlay({ interleaved: false, layers: [] })
     instance.addControl(deck)
@@ -111,8 +119,24 @@ export default function TripMap({
     // MapLibre only tracks window resizes; the panel can also change (mobile, sidebar).
     const observer = new ResizeObserver(() => instance.resize())
     observer.observe(container.current!)
+
+    // A browser may drop a WebGL context whenever it is under pressure, and this page holds two.
+    // Unhandled, the next draw throws from inside the render loop, where React cannot attribute
+    // it to anything. Ask for the context back, and if it does not come, fail loudly enough for
+    // the boundary above to catch it rather than leaving a blank map.
+    const canvas = instance.getCanvas()
+    const onLost = (event: Event) => {
+      event.preventDefault() // tells the browser a restore is wanted
+      console.warn('Map WebGL context lost; waiting for the browser to restore it')
+    }
+    const onRestored = () => instance.triggerRepaint()
+    canvas.addEventListener('webglcontextlost', onLost)
+    canvas.addEventListener('webglcontextrestored', onRestored)
+
     return () => {
       observer.disconnect()
+      canvas.removeEventListener('webglcontextlost', onLost)
+      canvas.removeEventListener('webglcontextrestored', onRestored)
       instance.remove()
       map.current = null
       overlay.current = null
@@ -435,7 +459,50 @@ export default function TripMap({
   return (
     <Box sx={{ position: 'absolute', inset: 0 }} onMouseLeave={() => setTooltip(null)}>
       {/* MapLibre's CSS forces position: relative on this node, so size it explicitly. */}
-      <Box ref={container} sx={{ width: '100%', height: '100%' }} />
+      <Box
+        ref={container}
+        sx={{
+          width: '100%',
+          height: '100%',
+          // The credit ships as a white pill, which on this basemap reads as a bright bar laid
+          // over the map. Give it the same treatment as the heatmap panel so it belongs here.
+          '&& .maplibregl-ctrl-attrib': {
+            bgcolor: 'rgba(13, 30, 45, 0.9)',
+            backdropFilter: 'blur(6px)',
+            border: `1px solid ${tokens.border}`,
+            borderRadius: 2,
+            color: tokens.textMuted,
+            fontSize: 11,
+            transition: `padding ${motion.base} ${motion.ease}`,
+          },
+          '&& .maplibregl-ctrl-attrib a': { color: tokens.turquoise },
+          // MapLibre opens and closes this by switching the inner between display none and
+          // block, and display cannot be transitioned. Keep it laid out and animate its width
+          // instead, clipped, so the credit slides out from behind the button.
+          '&& .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-inner': {
+            display: 'block',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            maxWidth: 0,
+            opacity: 0,
+            transition: `max-width ${motion.base} ${motion.ease}, opacity ${motion.fast} ${motion.ease}`,
+          },
+          '&& .maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-inner': {
+            maxWidth: '70vw',
+            opacity: 1,
+          },
+          // The ⓘ ships dark on its own white disc, for a light control. Drop the disc and flip
+          // the glyph so it sits on the panel instead of on top of it.
+          '&& .maplibregl-ctrl-attrib-button': {
+            bgcolor: 'transparent',
+            filter: 'invert(1)',
+            opacity: 0.55,
+            transition: `opacity ${motion.fast} ${motion.ease}`,
+            '&:hover': { opacity: 1 },
+          },
+          '&& .maplibregl-compact-show .maplibregl-ctrl-attrib-button': { opacity: 1 },
+        }}
+      />
 
       {trip && (
         <HeatmapControls
