@@ -3,7 +3,7 @@
 Picks the safest truck route by checking the forecast **at each checkpoint for the moment the truck will actually be there**, applying the load-weight rules, and only then comparing travel time.
 
 **Live app:** https://weather-truck-routing-1081490071089.us-central1.run.app
-**Walkthrough (Loom):** _link coming_
+**Walkthrough (Loom):** https://www.loom.com/share/5e555a2a37334dbc8381ec0f3bf0be76
 
 ![Three Virginia Beach → Atlantic City truck routes through a coastal wind storm, with route labels, risk-coloured checkpoints, the truck position, the forecast heatmap and the risk-over-time chart](docs/screenshot.jpg)
 
