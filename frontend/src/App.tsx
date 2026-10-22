@@ -27,10 +27,21 @@ export default function App() {
   })
   const error = trip.error as ApiError | null
 
+  // The heatmap is built from the trip's own route paths, so it has to follow the trip that is on
+  // screen rather than the request. While a re-plan is in flight the request is already the new
+  // one but trip.data is still the previous result (keepPreviousData), so fetching at that moment
+  // stores the OLD corridor under the NEW location's key — and nothing corrects it later, because
+  // the key doesn't change again when the real routes land. Wait for the trip to settle.
   // Same corridor for every checkpoint interval, so the interval isn't part of the key.
-  const routes = trip.data?.routes
+  const routes = trip.isPlaceholderData ? undefined : trip.data?.routes
   const heatmap = useQuery({
-    queryKey: ['heatmap', request?.origin, request?.destination, request?.depart_at, request?.weight_lb, routes?.length],
+    queryKey: [
+      'heatmap',
+      request?.origin,
+      request?.destination,
+      request?.depart_at,
+      request?.weight_lb,
+    ],
     queryFn: () =>
       fetchHeatmap(
         routes!.map((r) => r.path),
@@ -40,6 +51,8 @@ export default function App() {
     enabled: Boolean(routes && request),
     retry: false,
   })
+  // The heatmap can't start until the routes land, so a re-plan is pending heatmap work too.
+  const heatmapPending = heatmap.isFetching || trip.isFetching
 
   return (
     <Box
@@ -114,7 +127,7 @@ export default function App() {
             <TripMap
               trip={trip.data}
               heatmap={heatmap.data}
-              heatmapLoading={heatmap.isFetching}
+              heatmapLoading={heatmapPending}
               heatmapError={heatmap.isError}
               selectedId={selectedId}
               hoveredId={hoveredId}
